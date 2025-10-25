@@ -1,0 +1,11 @@
+{
+  "name": "love-api",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "description": "Medical Committee API - Backend Serverless Functions",
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
+
