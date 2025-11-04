@@ -3,8 +3,8 @@
  * للاتصال بقاعدة البيانات الحقيقية
  */
 
-const SUPABASE_URL = process.env.VITE_SUPABASE_URL || 'https://rujwuruuosffcxazymit.supabase.co';
-const SUPABASE_KEY = process.env.VITE_SUPABASE_ANON_KEY;
+const SUPABASE_URL = process.env.VITE_SUPABASE_URL || 'https://yeyntvrpkwcbihvbaemm.supabase.co';
+const SUPABASE_KEY = process.env.VITE_SUPABASE_ANON_KEY || 'sbp_bb0b8c4f883a12b2efbc3b1d9277e1d26569326b';
 
 export async function supabaseQuery(table, options = {}) {
   const { select = '*', filter = {}, limit, order } = options;
