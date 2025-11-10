@@ -32,7 +32,7 @@ export default async function handler(req, res) {
     const env = createEnv();
 
     // ==================== STATUS ====================
-    if (pathname === '/api/v1/status' && method === 'GET') {
+    if ((pathname === '/api/v1/status' || pathname === '/api/v1') && method === 'GET') {
       return res.status(200).json({
         success: true,
         status: 'healthy',
