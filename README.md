@@ -1,36 +1,84 @@
-# Love API - Medical Committee Backend
+# MMC-MMS API - Medical Committee Backend (Supabase)
 
-Backend API for the Military Medical Committee System.
+Backend API for the Military Medical Committee System using Supabase Edge Functions.
+
+## Architecture
+
+- **Platform**: Supabase Edge Functions (Deno runtime)
+- **Database**: PostgreSQL + PostgREST
+- **Real-time**: Supabase Realtime subscriptions
+- **Cron Jobs**: pg_cron for scheduled tasks
+- **CORS**: Handled in Edge Functions
 
 ## Deployment
 
-This project is deployed separately on Vercel as a standalone API project.
+This project is deployed on Supabase **only** - NOT on Vercel.
 
-## Endpoints
+## Setup
 
-- `GET /api/v1/status` - Health check
-- `POST /api/v1/patient/login` - Patient login
-- `POST /api/v1/queue/enter` - Enter queue
-- `GET /api/v1/queue/status` - Get queue status
-- `POST /api/v1/queue/call` - Call next patient
-- `POST /api/v1/queue/done` - Mark patient as done
-- `POST /api/v1/pin/generate` - Generate PIN
-- `POST /api/v1/pin/verify` - Verify PIN
-- And more...
+### Prerequisites
+```bash
+npm install -g supabase
+```
 
-## Environment Variables
+### Link to Supabase Project
+```bash
+supabase login
+supabase link --project-ref YOUR-PROJECT-REF
+```
 
-- `KV_REST_API_URL` - Vercel KV REST API URL (optional)
-- `KV_REST_API_TOKEN` - Vercel KV REST API Token (optional)
+### Deploy Functions
+```bash
+supabase functions deploy api-v1-status
+```
+
+### Run Migrations
+```bash
+supabase db push
+```
+
+## Edge Functions
+
+- `api-v1-status` - Health check with CORS support
+
+## Database Tables (Realtime Enabled)
+
+- `queues` - Active patient queues
+- `queue_history` - Historical queue data
+- `notifications` - System notifications
+- `pins` - Daily clinic PINs
+
+## Environment Variables (Supabase Secrets)
+
+Set in Supabase Dashboard → Project Settings → API → Secrets:
+
+```bash
+# Example service role key storage
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+```
 
 ## Local Development
 
 ```bash
-npm install -g vercel
-vercel dev
+supabase start
+supabase functions serve
 ```
 
-## Deploy
+## Endpoints
 
-Push to GitHub and Vercel will auto-deploy.
+Base URL: `https://YOUR-PROJECT-REF.functions.supabase.co/`
+
+- `GET /api-v1-status` - Health check
+- More functions to be added...
+
+## CORS Configuration
+
+All Edge Functions include CORS headers for cross-origin requests from the frontend.
+
+## Scheduled Tasks
+
+Cron jobs are managed via pg_cron extension:
+
+- Daily maintenance at 05:00 UTC
+- Custom schedules as needed
 
