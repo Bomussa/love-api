@@ -4,9 +4,9 @@
  */
 
 import { createEnv } from './lib/storage.js';
-import { 
-  validatePatientId, 
-  validateGender, 
+import {
+  validatePatientId,
+  validateGender,
   validateClinic,
   generatePIN,
   getClientIP
@@ -18,7 +18,7 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  
+
   // Handle OPTIONS
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
@@ -215,7 +215,7 @@ export default async function handler(req, res) {
       }
 
       // Assuming generatePIN() is a helper function that generates a 4-digit number
-      const pin = generatePIN(); 
+      const pin = generatePIN();
       const dateKey = new Date().toISOString().split('T')[0];
 
       const pinData = {
@@ -323,7 +323,7 @@ export default async function handler(req, res) {
             const queueData = await supabaseQuery('queue', {
               filter: { clinic_id: clinic.id, status: 'waiting' }
             });
-            
+
             return {
               id: clinic.id,
               name: clinic.name_ar || clinic.name,
@@ -336,9 +336,9 @@ export default async function handler(req, res) {
 
         // 3. Apply Dynamic Pathing Sort Logic
         const sortedQueues = queuesWithCounts.sort((a, b) => {
-          if (a.currentPatients === 0 && b.currentPatients !== 0) return -1; 
-          if (a.currentPatients !== 0 && b.currentPatients === 0) return 1;  
-          return a.currentPatients - b.currentPatients; 
+          if (a.currentPatients === 0 && b.currentPatients !== 0) return -1;
+          if (a.currentPatients !== 0 && b.currentPatients === 0) return 1;
+          return a.currentPatients - b.currentPatients;
         });
 
         // 4. Get real-time queue status
@@ -374,25 +374,25 @@ export default async function handler(req, res) {
     // Fix: Provide configuration and status flags to the frontend to resolve issues
     // with translation, icons, and save/update/change functionality.
     if (pathname === '/api/v1/admin/config' && method === 'GET') {
-        return res.status(200).json({
-            success: true,
-            config: {
-                // Translation Fix: Provide current language and available languages
-                languages: ['ar', 'en'],
-                currentLang: 'ar',
-                translationWorking: true,
-                // Icons and Save/Update/Change Fix: Feature flags
-                features: {
-                    saveEnabled: true,
-                    updateEnabled: true,
-                    iconsWorking: true, 
-                    clinicOpen: true // Fix: Clinics open as determined by the backend
-                },
-                message: 'Admin configuration loaded successfully'
-            }
-        });
+      return res.status(200).json({
+        success: true,
+        config: {
+          // Translation Fix: Provide current language and available languages
+          languages: ['ar', 'en'],
+          currentLang: 'ar',
+          translationWorking: true,
+          // Icons and Save/Update/Change Fix: Feature flags
+          features: {
+            saveEnabled: true,
+            updateEnabled: true,
+            iconsWorking: true,
+            clinicOpen: true // Fix: Clinics open as determined by the backend
+          },
+          message: 'Admin configuration loaded successfully'
+        }
+      });
     }
-    
+
     // ==================== ADMIN STATUS ====================
     if (pathname === '/api/v1/admin/status' && method === 'GET') {
       return res.status(200).json({
@@ -433,9 +433,9 @@ export default async function handler(req, res) {
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
       res.setHeader('Connection', 'keep-alive');
-      
+
       res.write(`data: ${JSON.stringify({ type: 'CONNECTED', timestamp: new Date().toISOString() })}\n\n`);
-      
+
       return;
     }
 
