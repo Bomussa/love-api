@@ -1,1 +1,6 @@
 .vercel
+.env
+.env.*
+.env.local
+.envrc
+supabase/.env

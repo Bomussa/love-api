@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
@@ -15,10 +16,12 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 serve(async (req) => {
   try {
     // Initialize Supabase client with service role key for admin access
-    const supabaseClient = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-    )
+    const url = Deno.env.get('SUPABASE_URL') ?? Deno.env.get('SB_URL') ?? ''
+    const key = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? Deno.env.get('SB_SERVICE_ROLE_KEY') ?? ''
+    if (!url || !key) {
+      throw new Error('Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY for generate-pins-cron')
+    }
+    const supabaseClient = createClient(url, key)
 
     // Get all active clinics
     const { data: clinics, error: clinicsError } = await supabaseClient
@@ -43,7 +46,7 @@ serve(async (req) => {
 
     // Generate PIN for each clinic
     const results = await Promise.all(
-      clinics.map(async (clinic) => {
+      (clinics as Array<{ id: string; name_ar: string | null }>).map(async (clinic) => {
         // Generate random 2-digit PIN (10-99)
         const pin = String(Math.floor(Math.random() * 90) + 10)
         
@@ -51,14 +54,15 @@ serve(async (req) => {
         const expiresAt = new Date()
         expiresAt.setHours(23, 59, 59, 999)
 
-        // Insert into pins table
+        // Insert into pins table (canonical schema)
         const { error: pinError } = await supabaseClient
           .from('pins')
           .insert({
-            clinic_id: clinic.id,
-            pin_code: pin,
+            clinic_code: clinic.id,        // استخدم معرف العيادة كنص ككود العيادة
+            pin: pin,
+            is_active: true,
+            generated_at: new Date().toISOString(),
             expires_at: expiresAt.toISOString(),
-            is_used: false,
             created_at: new Date().toISOString()
           })
 
@@ -72,7 +76,7 @@ serve(async (req) => {
           }
         }
 
-        // Update clinic with new PIN
+        // Update clinic with new PIN (optional, for dashboard display)
         const { error: updateError } = await supabaseClient
           .from('clinics')
           .update({
@@ -102,8 +106,8 @@ serve(async (req) => {
     )
 
     // Count successes and failures
-    const successCount = results.filter(r => r.success).length
-    const failureCount = results.filter(r => !r.success).length
+    const successCount = results.filter((r: any) => r.success).length
+    const failureCount = results.filter((r: any) => !r.success).length
 
     return new Response(
       JSON.stringify({
@@ -120,7 +124,7 @@ serve(async (req) => {
         headers: { "Content-Type": "application/json" } 
       }
     )
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error in generate-pins-cron:', error)
     return new Response(
       JSON.stringify({ 
