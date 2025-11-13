@@ -123,6 +123,34 @@ function nowIso(): string {
     return new Date().toISOString();
 }
 
+// Resolve queue table name at runtime: prefer 'queue' (singular), fallback to 'queues'
+let QUEUE_TABLE_CACHE: string | null = null;
+async function getQueueTable(client: SupabaseClient): Promise<string> {
+    if (QUEUE_TABLE_CACHE) return QUEUE_TABLE_CACHE;
+    try {
+        const testSingular = await client.from("queue").select("id", { head: true, count: "exact" }).limit(1);
+        if (!testSingular.error) {
+            QUEUE_TABLE_CACHE = "queue";
+            return QUEUE_TABLE_CACHE;
+        }
+    } catch {}
+    // If singular fails, try plural
+    try {
+        const testPlural = await client.from("queues").select("id", { head: true, count: "exact" }).limit(1);
+        if (!testPlural.error) {
+            QUEUE_TABLE_CACHE = "queues";
+            return QUEUE_TABLE_CACHE;
+        }
+    } catch {}
+    // Default to 'queue' to match current production schema if both probes fail
+    QUEUE_TABLE_CACHE = "queue";
+    return QUEUE_TABLE_CACHE;
+}
+
+function clinicCol(table: string): string {
+    return table === "queue" ? "clinic_id" : "clinic";
+}
+
 function startOfTodayIso(): string {
     const d = new Date();
     d.setUTCHours(0, 0, 0, 0);
@@ -131,6 +159,37 @@ function startOfTodayIso(): string {
 
 function normalizeGender(value: unknown): "male" | "female" {
     return value === "female" ? "female" : "male";
+}
+
+function isUuid(v: string): boolean {
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
+}
+
+async function resolveClinicKey(client: SupabaseClient, table: string, clinic: string): Promise<string> {
+    // For legacy plural table, the value is a text code already
+    if (table !== "queue") return clinic;
+
+    // If already UUID, accept directly
+    if (isUuid(clinic)) return clinic;
+
+    // Try to resolve text code/slug to UUID via clinics table
+    try {
+        const byCode = await client.from("clinics").select("id").eq("code", clinic).maybeSingle();
+        if (!byCode.error && byCode.data?.id) return byCode.data.id as string;
+        const bySlug = await client.from("clinics").select("id").eq("slug", clinic).maybeSingle();
+        if (!bySlug.error && bySlug.data?.id) return bySlug.data.id as string;
+
+        // If clinics table responded but no match, treat as bad input
+        if (!byCode.error && !bySlug.error) {
+            throw Object.assign(new Error("Unknown clinic"), { status: 400 });
+        }
+    } catch (e) {
+        // If schema errors (e.g., table missing), fall back to original for compatibility
+        // Caller paths are wrapped in global try/catch and will surface cleanly.
+    }
+
+    // Fallback: return original; some environments may still store text in clinic_id
+    return clinic;
 }
 
 async function readJsonBody<T>(req: Request): Promise<T> {
@@ -159,59 +218,64 @@ async function safeCount(
 }
 
 async function getSessionById(client: SupabaseClient, sessionId: string): Promise<Maybe<PatientSession>> {
-    const response = await client
+    // Try with relation and status first
+    let response = await client
         .from("patient_sessions")
-        .select("id, patient_id, expires_at, status, patients(id, name, military_id, gender)")
+        .select("id, patient_id, expires_at, patients(id, name, military_id, gender)")
         .eq("id", sessionId)
         .gte("expires_at", nowIso())
         .maybeSingle();
 
     if (response.error && response.error.code !== "PGRST116") {
-        throw response.error;
+        // Fallback without relation and without status column
+        const plain = await client
+            .from("patient_sessions")
+            .select("id, patient_id, expires_at")
+            .eq("id", sessionId)
+            .gte("expires_at", nowIso())
+            .maybeSingle();
+        if (plain.error && plain.error.code !== "PGRST116") throw plain.error;
+        return plain.data ?? null;
     }
 
     return response.data ?? null;
 }
 
 async function ensurePatient(client: SupabaseClient, militaryId: string, gender: string): Promise<{ id: string; gender: string; name: string | null }> {
-    const existing = await client
-        .from("patients")
-        .select("id, name, gender")
-        .eq("military_id", militaryId)
-        .maybeSingle();
-
-    if (existing.error && existing.error.code !== "PGRST116") {
-        throw existing.error;
-    }
-
-    if (existing.data) {
-        const genderValue = existing.data.gender ?? gender;
-        if (!existing.data.gender || existing.data.gender !== genderValue) {
-            await client
-                .from("patients")
-                .update({ gender: genderValue })
-                .eq("id", existing.data.id);
+    try {
+        // Check if patient exists by patient_id (per schema inventory)
+        const existing = await client
+            .from("patients")
+            .select("id, gender")
+            .eq("patient_id", militaryId)
+            .maybeSingle();
+        if (existing.error && existing.error.code !== "PGRST116") throw existing.error;
+        if (existing.data) {
+            return { id: existing.data.id, gender: existing.data.gender ?? gender, name: null };
         }
-        return { id: existing.data.id, gender: genderValue, name: existing.data.name ?? null };
+
+        // Insert new patient with required columns
+        const insert = await client
+            .from("patients")
+            .insert({
+                patient_id: militaryId,
+                gender,
+                login_time: nowIso(),
+                status: "logged_in",
+                created_at: nowIso()
+            })
+            .select("id")
+            .single();
+        if (insert.error) throw insert.error;
+        return { id: insert.data.id, gender, name: null };
+    } catch (e) {
+        const code = (e as { code?: string })?.code;
+        if (code === "42P01") {
+            // Table missing: fallback ephemeral patient
+            return { id: crypto.randomUUID(), gender, name: null };
+        }
+        throw e;
     }
-
-    const inferredName = `مراجع ${militaryId.slice(-4)}`;
-    const insert = await client
-        .from("patients")
-        .insert({
-            military_id: militaryId,
-            gender,
-            name: inferredName,
-            created_at: nowIso()
-        })
-        .select("id, name, gender")
-        .single();
-
-    if (insert.error) {
-        throw insert.error;
-    }
-
-    return { id: insert.data.id, gender: insert.data.gender ?? gender, name: insert.data.name ?? inferredName };
 }
 
 async function createSession(client: SupabaseClient, patientId: string): Promise<PatientSession> {
@@ -224,7 +288,6 @@ async function createSession(client: SupabaseClient, patientId: string): Promise
             id: sessionId,
             patient_id: patientId,
             token: sessionId,
-            status: "active",
             created_at: nowIso(),
             expires_at: expiresAt
         })
@@ -244,10 +307,13 @@ async function createSession(client: SupabaseClient, patientId: string): Promise
 }
 
 async function nextQueuePosition(client: SupabaseClient, clinic: string): Promise<number> {
+    const table = await getQueueTable(client);
+    const ccol = clinicCol(table);
+    const clinicKey = await resolveClinicKey(client, table, clinic);
     const latest = await client
-        .from("queues")
+        .from(table)
         .select("position")
-        .eq("clinic", clinic)
+        .eq(ccol, clinicKey)
         .order("position", { ascending: false, nullsFirst: false })
         .limit(1)
         .maybeSingle();
@@ -261,10 +327,13 @@ async function nextQueuePosition(client: SupabaseClient, clinic: string): Promis
 }
 
 async function countWaiting(client: SupabaseClient, clinic: string): Promise<number> {
+    const table = await getQueueTable(client);
+    const ccol = clinicCol(table);
+    const clinicKey = await resolveClinicKey(client, table, clinic);
     const { count, error } = await client
-        .from("queues")
+        .from(table)
         .select("id", { head: true, count: "exact" })
-        .eq("clinic", clinic)
+        .eq(ccol, clinicKey)
         .in("status", WAITING_STATES as unknown as string[]);
 
     if (error) throw error;
@@ -272,29 +341,55 @@ async function countWaiting(client: SupabaseClient, clinic: string): Promise<num
 }
 
 async function fetchQueueEntries(client: SupabaseClient, clinic: string, statuses: readonly string[]): Promise<QueueEntry[]> {
-    // Try with embedded relation first; fallback to plain select if relation is missing
-    let response = await client
-        .from("queues")
-        .select(
-            "id, clinic, patient_id, queue_number, position, status, priority, entered_at, called_at, completed_at, patients(id, name, military_id, gender)"
-        )
-        .eq("clinic", clinic)
-        .in("status", statuses as unknown as string[])
-        .order("position", { ascending: true, nullsFirst: true });
-
-    if (response.error) {
-        // Fallback without relation when FK not defined
-        const plain = await client
+    const table = await getQueueTable(client);
+    const ccol = clinicCol(table);
+    if (table === "queues") {
+        // Try with embedded relation first; fallback to plain select if relation is missing
+        let response = await client
             .from("queues")
-            .select("id, clinic, patient_id, queue_number, position, status, priority, entered_at, called_at, completed_at")
+            .select(
+                "id, clinic, patient_id, queue_number, position, status, priority, entered_at, called_at, completed_at, patients(id, name, military_id, gender)"
+            )
             .eq("clinic", clinic)
             .in("status", statuses as unknown as string[])
             .order("position", { ascending: true, nullsFirst: true });
-        if (plain.error) throw plain.error;
-        return (plain.data ?? []) as QueueEntry[];
-    }
 
-    return (response.data ?? []) as QueueEntry[];
+        if (response.error) {
+            // Fallback without relation when FK not defined
+            const plain = await client
+                .from("queues")
+                .select("id, clinic, patient_id, queue_number, position, status, priority, entered_at, called_at, completed_at")
+                .eq("clinic", clinic)
+                .in("status", statuses as unknown as string[])
+                .order("position", { ascending: true, nullsFirst: true });
+            if (plain.error) throw plain.error;
+            return (plain.data ?? []) as QueueEntry[];
+        }
+
+        return (response.data ?? []) as QueueEntry[];
+    } else {
+        const clinicKey = await resolveClinicKey(client, table, clinic);
+        const plain = await client
+            .from("queue")
+            .select("id, clinic_id, patient_id, position, status, entered_at, called_at, completed_at")
+            .eq(ccol, clinicKey)
+            .in("status", statuses as unknown as string[])
+            .order("position", { ascending: true, nullsFirst: true });
+        if (plain.error) throw plain.error;
+        return (plain.data ?? []).map((row: any) => ({
+            id: row.id,
+            clinic: row.clinic_id,
+            patient_id: row.patient_id,
+            queue_number: null,
+            position: row.position,
+            status: row.status,
+            priority: null,
+            entered_at: row.entered_at,
+            called_at: row.called_at,
+            completed_at: row.completed_at,
+            patients: null
+        })) as QueueEntry[];
+    }
 }
 
 async function fetchTodaysPin(client: SupabaseClient, clinic: string): Promise<PinRecord | null> {
@@ -365,10 +460,14 @@ async function ensureValidPin(client: SupabaseClient, clinic: string, value: str
 }
 
 async function queuePositionPayload(client: SupabaseClient, clinic: string, patientId: string): Promise<{ display_number: number; ahead: number; total_waiting: number; status: string | null; queue_number: string | null }> {
+    const table = await getQueueTable(client);
+    const ccol = clinicCol(table);
+    const clinicKey = await resolveClinicKey(client, table, clinic);
+    const selectCols = table === "queues" ? "id, position, status, queue_number" : "id, position, status";
     const activeEntry = await client
-        .from("queues")
-        .select("id, position, status, queue_number")
-        .eq("clinic", clinic)
+        .from(table)
+        .select(selectCols)
+        .eq(ccol, clinicKey)
         .eq("patient_id", patientId)
         .in("status", ACTIVE_STATES as unknown as string[])
         .order("entered_at", { ascending: false })
@@ -382,9 +481,9 @@ async function queuePositionPayload(client: SupabaseClient, clinic: string, pati
     const displayNumber = activeEntry.data?.position ?? -1;
 
     const aheadQuery = await client
-        .from("queues")
+        .from(table)
         .select("id", { head: true, count: "exact" })
-        .eq("clinic", clinic)
+        .eq(ccol, clinicKey)
         .eq("status", "waiting")
         .lt("position", activeEntry.data?.position ?? 0);
 
@@ -397,7 +496,7 @@ async function queuePositionPayload(client: SupabaseClient, clinic: string, pati
         ahead: Math.max(0, ahead),
         total_waiting: totalWaiting,
         status: activeEntry.data?.status ?? null,
-        queue_number: activeEntry.data?.queue_number ?? null
+        queue_number: table === "queues" ? (activeEntry.data as any)?.queue_number ?? null : null
     };
 }
 
@@ -450,33 +549,55 @@ async function handleQueueEnter(client: SupabaseClient, req: Request): Promise<R
     const position = await nextQueuePosition(client, clinic);
     const queueNumber = `${clinic.toUpperCase()}-${String(position).padStart(3, "0")}`;
 
-    const insert = await client
-        .from("queues")
-        .insert({
-            clinic,
-            patient_id: session.patient_id,
-            queue_number: queueNumber,
-            position,
-            status: isAutoEntry ? "in_progress" : "waiting",
-            priority: isAutoEntry ? "high" : "normal",
-            entered_at: nowIso()
-        })
-        .select("id")
-        .single();
+    const table = await getQueueTable(client);
+    const ccol = clinicCol(table);
+    const clinicKey = await resolveClinicKey(client, table, clinic);
+    let insert;
+    if (table === "queues") {
+        insert = await client
+            .from("queues")
+            .insert({
+                clinic,
+                patient_id: session.patient_id,
+                queue_number: queueNumber,
+                position,
+                status: isAutoEntry ? "in_progress" : "waiting",
+                priority: isAutoEntry ? "high" : "normal",
+                entered_at: nowIso()
+            })
+            .select("id")
+            .single();
+    } else {
+        insert = await client
+            .from("queue")
+            .insert({
+                [ccol]: clinicKey,
+                patient_id: session.patient_id,
+                patient_name: "مراجع",
+                exam_type: "general",
+                position,
+                status: isAutoEntry ? "in_progress" : "waiting",
+                entered_at: nowIso()
+            })
+            .select("id")
+            .single();
+    }
 
     if (insert.error) {
         throw insert.error;
     }
 
-    await client
-        .from("queue_history")
-        .insert({
-            clinic,
-            patient_id: session.patient_id,
-            action: "entered",
-            queue_number: queueNumber,
-            timestamp: nowIso()
-        });
+    try {
+        await client
+            .from("queue_history")
+            .insert({
+                clinic,
+                patient_id: session.patient_id,
+                action: "entered",
+                queue_number: queueNumber,
+                timestamp: nowIso()
+            });
+    } catch {}
 
     const totalWaiting = await countWaiting(client, clinic);
     const ahead = Math.max(0, position - 1);
@@ -591,18 +712,21 @@ async function handleQueueDone(client: SupabaseClient, req: Request): Promise<Re
         return errorResponse("Session not found or expired", 401);
     }
 
+    const table = await getQueueTable(client);
+    const ccol = clinicCol(table);
+    const clinicKey = await resolveClinicKey(client, table, clinic);
     const update = await client
-        .from("queues")
+        .from(table)
         .update({
             status: COMPLETED_STATE,
             completed_at: nowIso()
         })
-        .eq("clinic", clinic)
+        .eq(ccol, clinicKey)
         .eq("patient_id", session.patient_id)
         .in("status", ACTIVE_STATES as unknown as string[])
         .order("entered_at", { ascending: false })
         .limit(1)
-        .select("queue_number")
+        .select(table === 'queues' ? "queue_number" : "id")
         .maybeSingle();
 
     if (update.error) {
@@ -613,15 +737,17 @@ async function handleQueueDone(client: SupabaseClient, req: Request): Promise<Re
         return errorResponse("No active queue entry found", 404);
     }
 
-    await client
-        .from("queue_history")
-        .insert({
-            clinic,
-            patient_id: session.patient_id,
-            action: "completed",
-            queue_number: update.data.queue_number,
-            timestamp: nowIso()
-        });
+    try {
+        await client
+            .from("queue_history")
+            .insert({
+                clinic,
+                patient_id: session.patient_id,
+                action: "completed",
+                queue_number: (update as any).data.queue_number ?? null,
+                timestamp: nowIso()
+            });
+    } catch {}
 
     return jsonResponse({ success: true, message: "Queue completed" });
 }
@@ -645,18 +771,21 @@ async function handleClinicExit(client: SupabaseClient, req: Request): Promise<R
         return errorResponse("Session not found or expired", 401);
     }
 
+    const table = await getQueueTable(client);
+    const ccol = clinicCol(table);
+    const clinicKey = await resolveClinicKey(client, table, clinic);
     const update = await client
-        .from("queues")
+        .from(table)
         .update({
             status: COMPLETED_STATE,
             completed_at: nowIso()
         })
-        .eq("clinic", clinic)
+        .eq(ccol, clinicKey)
         .eq("patient_id", session.patient_id)
         .in("status", ACTIVE_STATES as unknown as string[])
         .order("entered_at", { ascending: false })
         .limit(1)
-        .select("queue_number")
+        .select(table === 'queues' ? "queue_number" : "id")
         .maybeSingle();
 
     if (update.error) {
@@ -667,15 +796,17 @@ async function handleClinicExit(client: SupabaseClient, req: Request): Promise<R
         return errorResponse("No active clinic entry found", 404);
     }
 
-    await client
-        .from("queue_history")
-        .insert({
-            clinic,
-            patient_id: session.patient_id,
-            action: "exited",
-            queue_number: update.data.queue_number,
-            timestamp: nowIso()
-        });
+    try {
+        await client
+            .from("queue_history")
+            .insert({
+                clinic,
+                patient_id: session.patient_id,
+                action: "exited",
+                queue_number: update.data.queue_number,
+                timestamp: nowIso()
+            });
+    } catch {}
 
     return jsonResponse({ success: true, message: "Patient exited clinic", route: [] });
 }
@@ -688,19 +819,32 @@ async function handleQueueCall(client: SupabaseClient, req: Request): Promise<Re
         return errorResponse("clinic is required", 400);
     }
 
-    const next = await client
-        .from("queues")
+    const table = await getQueueTable(client);
+    const ccol = clinicCol(table);
+    const clinicKey = await resolveClinicKey(client, table, clinic);
+    // Try with relation when using 'queues'; otherwise select minimal from 'queue'
+    let next = await client
+        .from(table)
         .select(
-            "id, queue_number, patient_id, position, status, patients(id, name, military_id, gender)"
+            table === 'queues' ? "id, queue_number, patient_id, position, status, patients(id, name, military_id, gender)" : "id, patient_id, position, status"
         )
-        .eq("clinic", clinic)
+        .eq(ccol, clinicKey)
         .eq("status", "waiting")
         .order("position", { ascending: true, nullsFirst: true })
         .limit(1)
         .maybeSingle();
 
-    if (next.error && next.error.code !== "PGRST116") {
-        throw next.error;
+    if (next.error && next.error.code !== "PGRST116" && table === 'queues') {
+        const plain = await client
+            .from("queues")
+            .select("id, queue_number, patient_id, position, status")
+            .eq("clinic", clinic)
+            .eq("status", "waiting")
+            .order("position", { ascending: true, nullsFirst: true })
+            .limit(1)
+            .maybeSingle();
+        if (plain.error && plain.error.code !== "PGRST116") throw plain.error;
+        next = plain as any;
     }
 
     if (!next.data) {
@@ -709,35 +853,37 @@ async function handleQueueCall(client: SupabaseClient, req: Request): Promise<Re
 
     const now = nowIso();
     const update = await client
-        .from("queues")
+        .from(table)
         .update({ status: "called", called_at: now })
         .eq("id", next.data.id)
-        .select("queue_number")
+        .select(table === 'queues' ? "queue_number" : "id")
         .single();
 
     if (update.error) throw update.error;
 
-    await client
-        .from("queue_history")
-        .insert({
-            clinic,
-            patient_id: next.data.patient_id,
-            action: "called",
-            queue_number: update.data.queue_number,
-            timestamp: now
-        });
+    try {
+        await client
+            .from("queue_history")
+            .insert({
+                clinic,
+                patient_id: next.data.patient_id,
+                action: "called",
+                queue_number: update.data.queue_number ?? null,
+                timestamp: now
+            });
+    } catch {}
 
     return jsonResponse({
         success: true,
         calledPatient: {
             id: next.data.id,
-            number: update.data.queue_number,
-            patient: next.data.patients
+            number: (update as any).data.queue_number ?? null,
+            patient: (next as any).data.patients
                 ? {
-                    id: next.data.patients.id,
-                    name: next.data.patients.name,
-                    militaryId: next.data.patients.military_id,
-                    gender: next.data.patients.gender
+                    id: (next as any).data.patients.id,
+                    name: (next as any).data.patients.name,
+                    militaryId: (next as any).data.patients.military_id,
+                    gender: (next as any).data.patients.gender
                 }
                 : null
         }
@@ -861,42 +1007,57 @@ async function handleAdminPinStatus(client: SupabaseClient, url: URL): Promise<R
 }
 
 async function handleStatsDashboard(client: SupabaseClient): Promise<Response> {
-    const startOfDay = startOfTodayIso();
-
-    const [totalPatients, waitingCount, completedToday] = await Promise.all([
-        safeCount(client, "patients"),
-        safeCount(client, "queues", (q) => q.in("status", ACTIVE_STATES as unknown as string[])),
-        safeCount(client, "queues", (q) => q.eq("status", COMPLETED_STATE).gte("completed_at", startOfDay))
-    ]);
-
-    let activeQueuesCount = 0;
     try {
-        const queues = await client
-            .from("queues")
-            .select("clinic")
-            .in("status", ACTIVE_STATES as unknown as string[]);
-        if (!queues.error) {
-            const activeClinics = new Set<string>();
-            for (const row of queues.data ?? []) {
-                if (row && typeof row.clinic === "string") activeClinics.add(row.clinic);
-            }
-            activeQueuesCount = activeClinics.size;
-        }
-    } catch {
-        activeQueuesCount = 0;
-    }
+        const startOfDay = startOfTodayIso();
 
-    return jsonResponse({
-        success: true,
-        stats: {
-            totalPatients: totalPatients ?? 0,
-            activeQueues: activeQueuesCount,
-            totalWaiting: waitingCount ?? 0,
-            completedToday: completedToday ?? 0,
-            averageWaitTime: Math.max(5, ((waitingCount ?? 0) || 1) * 3),
-            lastRefreshed: nowIso()
+        const [totalPatients, waitingCount, completedToday] = await Promise.all([
+            safeCount(client, "patients"),
+            safeCount(client, "queues", (q) => q.in("status", ACTIVE_STATES as unknown as string[])),
+            safeCount(client, "queues", (q) => q.eq("status", COMPLETED_STATE).gte("completed_at", startOfDay))
+        ]);
+
+        let activeQueuesCount = 0;
+        try {
+            const queues = await client
+                .from("queues")
+                .select("clinic")
+                .in("status", ACTIVE_STATES as unknown as string[]);
+            if (!queues.error) {
+                const activeClinics = new Set<string>();
+                for (const row of queues.data ?? []) {
+                    if (row && typeof row.clinic === "string") activeClinics.add(row.clinic);
+                }
+                activeQueuesCount = activeClinics.size;
+            }
+        } catch {
+            activeQueuesCount = 0;
         }
-    });
+
+        return jsonResponse({
+            success: true,
+            stats: {
+                totalPatients: totalPatients ?? 0,
+                activeQueues: activeQueuesCount,
+                totalWaiting: waitingCount ?? 0,
+                completedToday: completedToday ?? 0,
+                averageWaitTime: Math.max(5, ((waitingCount ?? 0) || 1) * 3),
+                lastRefreshed: nowIso()
+            }
+        });
+    } catch (_) {
+        // On any failure (e.g., table missing), return safe zeros instead of 500
+        return jsonResponse({
+            success: true,
+            stats: {
+                totalPatients: 0,
+                activeQueues: 0,
+                totalWaiting: 0,
+                completedToday: 0,
+                averageWaitTime: 5,
+                lastRefreshed: nowIso()
+            }
+        });
+    }
 }
 
 async function handleStatsQueues(client: SupabaseClient): Promise<Response> {

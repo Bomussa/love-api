@@ -23,10 +23,10 @@ serve(async (req) => {
     }
     const supabaseClient = createClient(url, key)
 
-    // Get all active clinics
+    // Get all active clinics (include code/slug for canonical clinic_code)
     const { data: clinics, error: clinicsError } = await supabaseClient
       .from('clinics')
-      .select('id, name_ar')
+      .select('id, code, slug, name_ar')
       .eq('is_active', true)
 
     if (clinicsError) {
@@ -46,7 +46,7 @@ serve(async (req) => {
 
     // Generate PIN for each clinic
     const results = await Promise.all(
-      (clinics as Array<{ id: string; name_ar: string | null }>).map(async (clinic) => {
+      (clinics as Array<{ id: string; code?: string | null; slug?: string | null; name_ar: string | null }>).map(async (clinic) => {
         // Generate random 2-digit PIN (10-99)
         const pin = String(Math.floor(Math.random() * 90) + 10)
         
@@ -58,7 +58,8 @@ serve(async (req) => {
         const { error: pinError } = await supabaseClient
           .from('pins')
           .insert({
-            clinic_code: clinic.id,        // استخدم معرف العيادة كنص ككود العيادة
+            // Use clinic code if available; fallback to slug; finally id
+            clinic_code: (clinic.code && String(clinic.code).trim()) || (clinic.slug && String(clinic.slug).trim()) || clinic.id,
             pin: pin,
             is_active: true,
             generated_at: new Date().toISOString(),
