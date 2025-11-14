@@ -105,6 +105,50 @@ function errorResponse(message: string, status = 400, details?: Record<string, u
     return jsonResponse({ success: false, error: message, ...(details ?? {}) }, status);
 }
 
+/* --- DIAGNOSTIC HELPERS ADDED --- */
+function jsonError(message: string, status = 500): Response {
+    return jsonResponse({ success: false, error: String(message) }, status);
+}
+
+async function diagLogRequest(req: Request, note = ""): Promise<void> {
+    try {
+        const url = new URL(req.url);
+        let bodyText = "";
+        if (req.method === "POST" || req.method === "PUT" || req.method === "PATCH") {
+            try {
+                bodyText = await req.clone().text();
+            } catch {
+                bodyText = "<unable to read>";
+            }
+        }
+        console.log(`[DIAG${note ? ` ${note}` : ""}] ${req.method} ${url.pathname}`, {
+            method: req.method,
+            path: url.pathname,
+            query: Object.fromEntries(url.searchParams.entries()),
+            bodyLength: bodyText.length,
+            bodyPreview: bodyText.slice(0, 200)
+        });
+    } catch (err) {
+        console.error("[DIAG] logging failed:", err);
+    }
+}
+
+async function safeHandlePatientLogin(client: SupabaseClient, req: Request): Promise<Response> {
+    try {
+        await diagLogRequest(req, "patient/login");
+        const result = await handlePatientLogin(client, req);
+        if (!result || !result.body) {
+            console.error("[DIAG patient/login] Handler returned invalid response");
+            return jsonError("Internal error: empty response from handler", 500);
+        }
+        return result;
+    } catch (err) {
+        console.error("[DIAG patient/login] Exception:", err);
+        const status = (err as { status?: number }).status ?? 500;
+        return jsonError((err as Error).message ?? "Unknown error in patient login", status);
+    }
+}
+
 function extractPath(url: URL): string {
     const override = url.searchParams.get("path");
     if (override) {
@@ -1525,7 +1569,7 @@ serve(async (req: Request): Promise<Response> => {
         }
 
         if (path === "patient/login" && req.method === "POST") {
-            return await handlePatientLogin(client, req);
+            return await safeHandlePatientLogin(client, req);
         }
 
         if (path === "queue/enter" && req.method === "POST") {
