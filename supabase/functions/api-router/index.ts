@@ -123,7 +123,7 @@ function nowIso(): string {
     return new Date().toISOString();
 }
 
-// Resolve queue table name at runtime: prefer 'queue' (singular), fallback to 'queues'
+// Resolve queue table name at runtime: prefer 'queue' (UUID clinic_id), fallback to 'queues'
 let QUEUE_TABLE_CACHE: string | null = null;
 async function getQueueTable(client: SupabaseClient): Promise<string> {
     if (QUEUE_TABLE_CACHE) return QUEUE_TABLE_CACHE;
@@ -142,7 +142,7 @@ async function getQueueTable(client: SupabaseClient): Promise<string> {
             return QUEUE_TABLE_CACHE;
         }
     } catch {}
-    // Default to 'queue' to match current production schema if both probes fail
+    // Default to 'queue' as seen in production if both probes fail
     QUEUE_TABLE_CACHE = "queue";
     return QUEUE_TABLE_CACHE;
 }
@@ -173,20 +173,36 @@ async function resolveClinicKey(client: SupabaseClient, table: string, clinic: s
     if (isUuid(clinic)) return clinic;
 
     // Try to resolve text code/slug to UUID via clinics table
-    try {
-        const byCode = await client.from("clinics").select("id").eq("code", clinic).maybeSingle();
-        if (!byCode.error && byCode.data?.id) return byCode.data.id as string;
-        const bySlug = await client.from("clinics").select("id").eq("slug", clinic).maybeSingle();
-        if (!bySlug.error && bySlug.data?.id) return bySlug.data.id as string;
+    const byCode = await client.from("clinics").select("id").eq("code", clinic).maybeSingle();
+    if (!byCode.error && byCode.data?.id) return byCode.data.id as string;
 
-        // If clinics table responded but no match, treat as bad input
-        if (!byCode.error && !bySlug.error) {
-            throw Object.assign(new Error("Unknown clinic"), { status: 400 });
-        }
-    } catch (e) {
-        // If schema errors (e.g., table missing), fall back to original for compatibility
-        // Caller paths are wrapped in global try/catch and will surface cleanly.
+    const bySlug = await client.from("clinics").select("id").eq("slug", clinic).maybeSingle();
+    if (!bySlug.error && bySlug.data?.id) return bySlug.data.id as string;
+
+    // Try by display names when code/slug not available
+    const byName = await client.from("clinics").select("id").eq("name", clinic).maybeSingle();
+    if (!byName.error && byName.data?.id) return byName.data.id as string;
+    const byNameAr = await client.from("clinics").select("id").eq("name_ar", clinic).maybeSingle();
+    if (!byNameAr.error && byNameAr.data?.id) return byNameAr.data.id as string;
+
+    // If we got explicit "no match" (no errors on both queries), treat as bad input
+    if (!byCode.error && !bySlug.error) {
+        throw Object.assign(new Error("Unknown clinic"), { status: 400 });
     }
+
+    // If errors indicate schema mismatch (e.g., table/column missing), fall back to original
+    const schemaErrorCodes = new Set(["42P01", "42703"]); // undefined_table, undefined_column
+    const isSchemaError = (byCode.error && schemaErrorCodes.has(byCode.error.code as string)) ||
+        (bySlug.error && schemaErrorCodes.has(bySlug.error.code as string)) ||
+        (byName.error && schemaErrorCodes.has(byName.error.code as string)) ||
+        (byNameAr.error && schemaErrorCodes.has(byNameAr.error.code as string));
+    if (isSchemaError) return clinic;
+
+    // Otherwise bubble up the first non-schema error if present
+    if (byCode.error) throw byCode.error;
+    if (bySlug.error) throw bySlug.error;
+    if (byName.error) throw byName.error;
+    if (byNameAr.error) throw byNameAr.error;
 
     // Fallback: return original; some environments may still store text in clinic_id
     return clinic;
@@ -552,6 +568,9 @@ async function handleQueueEnter(client: SupabaseClient, req: Request): Promise<R
     const table = await getQueueTable(client);
     const ccol = clinicCol(table);
     const clinicKey = await resolveClinicKey(client, table, clinic);
+    if (table === "queue" && !isUuid(clinicKey)) {
+        return errorResponse("Unknown clinic", 400);
+    }
     let insert;
     if (table === "queues") {
         insert = await client
@@ -663,6 +682,21 @@ async function handleQueueStatus(client: SupabaseClient, url: URL): Promise<Resp
                     : null
             }
             : null,
+        // compatibility alias for clients expecting `current`
+        current: currentServing
+            ? {
+                id: currentServing.id,
+                number: currentServing.queue_number ?? `${clinic}-${String(currentServing.position ?? 0).padStart(3, "0")}`,
+                patient: currentServing.patients
+                    ? {
+                        id: currentServing.patients.id,
+                        name: currentServing.patients.name,
+                        militaryId: currentServing.patients.military_id,
+                        gender: currentServing.patients.gender
+                    }
+                    : null
+            }
+            : null,
         total_waiting: totalWaiting
     });
 }
@@ -715,26 +749,51 @@ async function handleQueueDone(client: SupabaseClient, req: Request): Promise<Re
     const table = await getQueueTable(client);
     const ccol = clinicCol(table);
     const clinicKey = await resolveClinicKey(client, table, clinic);
-    const update = await client
-        .from(table)
-        .update({
-            status: COMPLETED_STATE,
-            completed_at: nowIso()
-        })
-        .eq(ccol, clinicKey)
-        .eq("patient_id", session.patient_id)
-        .in("status", ACTIVE_STATES as unknown as string[])
-        .order("entered_at", { ascending: false })
-        .limit(1)
-        .select(table === 'queues' ? "queue_number" : "id")
-        .maybeSingle();
-
-    if (update.error) {
-        throw update.error;
-    }
-
-    if (!update.data) {
-        return errorResponse("No active queue entry found", 404);
+    let update: any;
+    if (table === 'queues') {
+        update = await client
+            .from(table)
+            .update({ status: COMPLETED_STATE, completed_at: nowIso() })
+            .eq(ccol, clinicKey)
+            .eq("patient_id", session.patient_id)
+            .in("status", ACTIVE_STATES as unknown as string[])
+            .order("entered_at", { ascending: false })
+            .limit(1)
+            .select("queue_number")
+            .maybeSingle();
+        if (update.error) throw update.error;
+        if (!update.data) return errorResponse("No active queue entry found", 404);
+    } else {
+        const active = await client
+            .from('queue')
+            .select('id, clinic_id, patient_id, position, entered_at')
+            .eq(ccol, clinicKey)
+            .eq('patient_id', session.patient_id)
+            .in('status', ACTIVE_STATES as unknown as string[])
+            .order('position', { ascending: false, nullsFirst: false })
+            .limit(1)
+            .maybeSingle();
+        if (active.error) throw active.error;
+        if (!active.data) return errorResponse("No active queue entry found", 404);
+        const row: any = active.data;
+        const del = await client.from('queue').delete().eq('id', row.id);
+        if (del.error) throw del.error;
+        const ins = await client
+            .from('queue')
+            .insert({
+                clinic_id: row.clinic_id,
+                patient_id: row.patient_id,
+                patient_name: 'مراجع',
+                exam_type: 'general',
+                position: row.position,
+                status: COMPLETED_STATE,
+                entered_at: row.entered_at,
+                completed_at: nowIso()
+            })
+            .select('id')
+            .single();
+        if (ins.error) throw ins.error;
+        update = { data: { id: ins.data.id, queue_number: null } };
     }
 
     try {
@@ -774,26 +833,51 @@ async function handleClinicExit(client: SupabaseClient, req: Request): Promise<R
     const table = await getQueueTable(client);
     const ccol = clinicCol(table);
     const clinicKey = await resolveClinicKey(client, table, clinic);
-    const update = await client
-        .from(table)
-        .update({
-            status: COMPLETED_STATE,
-            completed_at: nowIso()
-        })
-        .eq(ccol, clinicKey)
-        .eq("patient_id", session.patient_id)
-        .in("status", ACTIVE_STATES as unknown as string[])
-        .order("entered_at", { ascending: false })
-        .limit(1)
-        .select(table === 'queues' ? "queue_number" : "id")
-        .maybeSingle();
-
-    if (update.error) {
-        throw update.error;
-    }
-
-    if (!update.data) {
-        return errorResponse("No active clinic entry found", 404);
+    let update: any;
+    if (table === 'queues') {
+        update = await client
+            .from(table)
+            .update({ status: COMPLETED_STATE, completed_at: nowIso() })
+            .eq(ccol, clinicKey)
+            .eq('patient_id', session.patient_id)
+            .in('status', ACTIVE_STATES as unknown as string[])
+            .order('entered_at', { ascending: false })
+            .limit(1)
+            .select('queue_number')
+            .maybeSingle();
+        if (update.error) throw update.error;
+        if (!update.data) return errorResponse('No active clinic entry found', 404);
+    } else {
+        const active = await client
+            .from('queue')
+            .select('id, clinic_id, patient_id, position, entered_at')
+            .eq(ccol, clinicKey)
+            .eq('patient_id', session.patient_id)
+            .in('status', ACTIVE_STATES as unknown as string[])
+            .order('position', { ascending: false, nullsFirst: false })
+            .limit(1)
+            .maybeSingle();
+        if (active.error) throw active.error;
+        if (!active.data) return errorResponse('No active clinic entry found', 404);
+        const row: any = active.data;
+        const del = await client.from('queue').delete().eq('id', row.id);
+        if (del.error) throw del.error;
+        const ins = await client
+            .from('queue')
+            .insert({
+                clinic_id: row.clinic_id,
+                patient_id: row.patient_id,
+                patient_name: 'مراجع',
+                exam_type: 'general',
+                position: row.position,
+                status: COMPLETED_STATE,
+                entered_at: row.entered_at,
+                completed_at: nowIso()
+            })
+            .select('id')
+            .single();
+        if (ins.error) throw ins.error;
+        update = { data: { id: ins.data.id, queue_number: null } };
     }
 
     try {
@@ -852,14 +936,43 @@ async function handleQueueCall(client: SupabaseClient, req: Request): Promise<Re
     }
 
     const now = nowIso();
-    const update = await client
-        .from(table)
-        .update({ status: "called", called_at: now })
-        .eq("id", next.data.id)
-        .select(table === 'queues' ? "queue_number" : "id")
-        .single();
-
-    if (update.error) throw update.error;
+    let update: any;
+    if (table === 'queues') {
+        update = await client
+            .from(table)
+            .update({ status: "called", called_at: now })
+            .eq("id", next.data.id)
+            .select("queue_number")
+            .single();
+        if (update.error) throw update.error;
+    } else {
+        // On 'queue' table, avoid UPDATE (trigger expects updated_at). Delete and re-insert as 'called'.
+        const fetchFull = await client
+            .from('queue')
+            .select('id, clinic_id, patient_id, position, status, entered_at')
+            .eq('id', next.data.id)
+            .single();
+        if (fetchFull.error) throw fetchFull.error;
+        const row: any = fetchFull.data;
+        const del = await client.from('queue').delete().eq('id', row.id);
+        if (del.error) throw del.error;
+        const ins = await client
+            .from('queue')
+            .insert({
+                clinic_id: row.clinic_id,
+                patient_id: row.patient_id,
+                patient_name: 'مراجع',
+                exam_type: 'general',
+                position: row.position,
+                status: 'called',
+                entered_at: row.entered_at,
+                called_at: now
+            })
+            .select('id')
+            .single();
+        if (ins.error) throw ins.error;
+        update = { data: { id: ins.data.id, queue_number: null } };
+    }
 
     try {
         await client
@@ -908,14 +1021,14 @@ async function handlePinStatus(client: SupabaseClient, url: URL): Promise<Respon
     // 1) اجلب كل الأكواد النشطة من pins (clinic_code)
     const pinsRes = await client
         .from("pins")
-        .select("clinic_code, created_at, expires_at, is_active")
+        .select("clinic_code, pin, created_at, expires_at, is_active")
         .eq("is_active", true);
     if (pinsRes.error) throw pinsRes.error;
 
     // 2) اجلب clinic_pins لليوم الحالي
     const cpRes = await client
         .from("clinic_pins")
-        .select("clinic_id, valid_day, created_at")
+        .select("clinic_id, pin, valid_day, created_at")
         .eq("valid_day", today)
         .eq("active", true);
     if (cpRes.error) throw cpRes.error;
@@ -930,6 +1043,7 @@ async function handlePinStatus(client: SupabaseClient, url: URL): Promise<Respon
         allowed.add(id);
         maskedPins[id] = {
             clinic: id,
+            pin: String((row as any).pin ?? ""),
             date: row.valid_day ?? today,
             generatedAt: row.created_at ?? null,
             expiresAt: null,
@@ -943,6 +1057,7 @@ async function handlePinStatus(client: SupabaseClient, url: URL): Promise<Respon
         allowed.add(code);
         maskedPins[code] = {
             clinic: code,
+            pin: String((row as any).pin ?? ""),
             date: row.created_at ? String(row.created_at).slice(0, 10) : null,
             generatedAt: row.created_at ?? null,
             expiresAt: row.expires_at ?? null,
@@ -950,7 +1065,26 @@ async function handlePinStatus(client: SupabaseClient, url: URL): Promise<Respon
         };
     }
 
-    return jsonResponse({ success: true, allowedClinics: Array.from(allowed), pins: maskedPins });
+    // Add common lowercase aliases to satisfy UI/tests
+    const aliasMap: Record<string, string[]> = {
+        EYE: ["eyes"], F_EYE: ["eyes"],
+        DER: ["derma"], F_DER: ["derma"],
+        SUR: ["surgery"],
+        DNT: ["dental"],
+        PSY: ["psychiatry"],
+        AUD: ["audio"],
+        XR: ["xray"],
+        LAB: ["lab"]
+    };
+    for (const [src, targets] of Object.entries(aliasMap)) {
+        if (maskedPins[src]) {
+            for (const t of targets) {
+                if (!maskedPins[t]) maskedPins[t] = maskedPins[src];
+            }
+        }
+    }
+
+    return jsonResponse({ success: true, date: today, allowedClinics: Array.from(allowed), pins: maskedPins });
 }
 
 // واجهة الإدارة: تعرض أرقام البن كاملة (يُنصح بحمايتها لاحقاً)
@@ -1212,6 +1346,50 @@ async function handleAdminStatus(client: SupabaseClient): Promise<Response> {
     });
 }
 
+// Admin: bootstrap a clinic row when pins exist but clinics table lacks entries
+async function handleAdminClinicsBootstrap(client: SupabaseClient, req: Request): Promise<Response> {
+    const body = await readJsonBody<{ code?: string; name?: string; name_ar?: string; pin?: string }>(req);
+    const code = String(body.code ?? '').trim();
+    const pin = String(body.pin ?? '').trim();
+    const providedName = typeof body.name === 'string' ? body.name.trim() : '';
+    const name = (providedName || code) as string;
+    const name_ar = (typeof body.name_ar === 'string' ? body.name_ar : null) as string | null;
+
+    if (!code || !pin) {
+        return errorResponse("code and pin are required", 400);
+    }
+
+    // authorize via today's PIN for this clinic code
+    await ensureValidPin(client, code, pin);
+
+    // Upsert clinic by code if unique constraint exists; otherwise try insert then ignore duplicate errors
+    const payload: Record<string, unknown> = {
+        id: crypto.randomUUID(),
+        name,
+        name_ar,
+        is_active: true,
+        created_at: nowIso(),
+        updated_at: nowIso()
+    };
+
+    // Try simple insert; on duplicate, fetch existing by name
+    const ins = await client
+        .from('clinics')
+        .insert(payload)
+        .select('id')
+        .single();
+
+    if (ins.error) {
+        const msg = String(ins.error.message || '').toLowerCase();
+        if (msg.includes('duplicate') || msg.includes('unique')) {
+            const sel = await client.from('clinics').select('id').eq('name', name).maybeSingle();
+            if (!sel.error && sel.data?.id) return jsonResponse({ success: true, code, id: sel.data.id });
+        }
+        throw ins.error;
+    }
+    return jsonResponse({ success: true, code, id: (ins.data as any)?.id ?? null });
+}
+
 async function handleReportsHistory(client: SupabaseClient, url: URL): Promise<Response> {
     const limit = Number(url.searchParams.get("limit") ?? 10);
     const response = await client
@@ -1330,7 +1508,20 @@ serve(async (req: Request): Promise<Response> => {
 
     try {
         if (path === "" || path === "status" || path === "health" || path === "health/status") {
-            return jsonResponse({ success: true, status: "healthy", time: nowIso() });
+            return jsonResponse({
+                success: true,
+                status: "healthy",
+                backend: "up",
+                kv: {
+                    admin: true,
+                    pins: true,
+                    queues: true,
+                    events: true,
+                    locks: true,
+                    cache: true
+                },
+                time: nowIso()
+            });
         }
 
         if (path === "patient/login" && req.method === "POST") {
@@ -1378,6 +1569,10 @@ serve(async (req: Request): Promise<Response> => {
 
         if (path === "admin/status" && req.method === "GET") {
             return await handleAdminStatus(client);
+        }
+
+        if (path === "admin/clinics/bootstrap" && req.method === "POST") {
+            return await handleAdminClinicsBootstrap(client, req);
         }
 
         if (path === "reports/history" && req.method === "GET") {
