@@ -88,6 +88,64 @@ interface QueueSummary {
     lastUpdate: string;
 }
 
+// --- Lightweight reliability layer (retry + cache + circuit breaker) ---
+interface Breaker { failures: number; openedAt: number; }
+const BREAKERS: Record<string, Breaker> = {};
+const BREAKER_THRESHOLD = 3; // open after 3 consecutive failures
+const BREAKER_COOLDOWN_MS = 60_000; // auto half-open after 60s
+
+function breakerKey(op: string, id?: string) {
+    return id ? `${op}:${id}` : op;
+}
+function isBreakerOpen(key: string): boolean {
+    const b = BREAKERS[key];
+    if (!b) return false;
+    const elapsed = Date.now() - b.openedAt;
+    if (b.failures >= BREAKER_THRESHOLD && elapsed < BREAKER_COOLDOWN_MS) return true;
+    if (elapsed >= BREAKER_COOLDOWN_MS) {
+        // half-open: allow next attempt
+        b.failures = 0;
+        b.openedAt = 0;
+    }
+    return false;
+}
+function recordFailure(key: string) {
+    const b = BREAKERS[key] ?? { failures: 0, openedAt: 0 };
+    b.failures += 1;
+    if (b.failures >= BREAKER_THRESHOLD && b.openedAt === 0) b.openedAt = Date.now();
+    BREAKERS[key] = b;
+}
+function recordSuccess(key: string) {
+    if (BREAKERS[key]) BREAKERS[key] = { failures: 0, openedAt: 0 };
+}
+
+// Simple in-memory caches for last successful payloads
+const CACHE = {
+    queueStatus: new Map<string, { payload: any; time: number }>(),
+    pinStatus: { payload: null as any, time: 0 },
+    statsDashboard: { payload: null as any, time: 0 }
+};
+
+async function withRetry<T>(fn: () => Promise<T>, key: string, attempts = 3): Promise<T> {
+    if (isBreakerOpen(key)) {
+        throw Object.assign(new Error("breaker_open"), { code: 'BREAKER', breaker: key });
+    }
+    let lastErr: any;
+    for (let i = 0; i < attempts; i++) {
+        try {
+            const res = await fn();
+            recordSuccess(key);
+            return res;
+        } catch (e) {
+            lastErr = e;
+            // backoff
+            await new Promise(r => setTimeout(r, i === 0 ? 75 : i === 1 ? 150 : 300));
+        }
+    }
+    recordFailure(key);
+    throw lastErr;
+}
+
 function supabase(): SupabaseClient {
     return createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
         auth: { persistSession: false }
@@ -670,11 +728,12 @@ async function handleQueueStatus(client: SupabaseClient, url: URL): Promise<Resp
     if (!clinic) {
         return errorResponse("clinic query parameter is required", 400);
     }
+    const breaker = breakerKey('queue_status', clinic);
+    try {
+        const entries = await withRetry(() => fetchQueueEntries(client, clinic, ACTIVE_STATES), breaker);
+        const totalWaiting = entries.filter((item) => item.status === "waiting").length;
 
-    const entries = await fetchQueueEntries(client, clinic, ACTIVE_STATES);
-    const totalWaiting = entries.filter((item) => item.status === "waiting").length;
-
-    const list = entries.map((entry, index) => ({
+        const list = entries.map((entry, index) => ({
         id: entry.id,
         number: entry.queue_number ?? `${clinic}-${String(entry.position ?? index + 1).padStart(3, "0")}`,
         position: entry.position ?? index + 1,
@@ -689,14 +748,12 @@ async function handleQueueStatus(client: SupabaseClient, url: URL): Promise<Resp
             }
             : null
     }));
-
-    const currentServing = entries.find((entry) => entry.status === "called" || entry.status === "in_service" || entry.status === "in_progress") ?? null;
-
-    return jsonResponse({
-        success: true,
-        clinic,
-        list,
-        current_serving: currentServing
+        const currentServing = entries.find((entry) => entry.status === "called" || entry.status === "in_service" || entry.status === "in_progress") ?? null;
+        const responsePayload = {
+            success: true,
+            clinic,
+            list,
+            current_serving: currentServing
             ? {
                 id: currentServing.id,
                 number: currentServing.queue_number,
@@ -711,7 +768,7 @@ async function handleQueueStatus(client: SupabaseClient, url: URL): Promise<Resp
             }
             : null,
         // compatibility alias for clients expecting `current`
-        current: currentServing
+            current: currentServing
             ? {
                 id: currentServing.id,
                 number: currentServing.queue_number ?? `${clinic}-${String(currentServing.position ?? 0).padStart(3, "0")}`,
@@ -725,8 +782,18 @@ async function handleQueueStatus(client: SupabaseClient, url: URL): Promise<Resp
                     : null
             }
             : null,
-        total_waiting: totalWaiting
-    });
+            total_waiting: totalWaiting,
+            degraded: false
+        };
+        CACHE.queueStatus.set(clinic, { payload: responsePayload, time: Date.now() });
+        return jsonResponse(responsePayload);
+    } catch (err) {
+        const cached = CACHE.queueStatus.get(clinic);
+        if (cached) {
+            return jsonResponse({ ...cached.payload, degraded: true, source: 'cache', breaker_open: isBreakerOpen(breaker) });
+        }
+        return errorResponse('Queue status unavailable', 503, { degraded: true, breaker_open: isBreakerOpen(breaker) });
+    }
 }
 
 async function handleQueuePosition(client: SupabaseClient, url: URL): Promise<Response> {
@@ -1045,27 +1112,21 @@ async function handlePinStatus(client: SupabaseClient, url: URL): Promise<Respon
     }
 
     const today = startOfTodayIso().slice(0, 10);
+    try {
+        const pinsRes = await withRetry(() => client
+            .from("pins")
+            .select("clinic_code, pin, created_at, expires_at, is_active")
+            .eq("is_active", true), 'pin_status:pins');
+        const cpRes = await withRetry(() => client
+            .from("clinic_pins")
+            .select("clinic_id, pin, valid_day, created_at")
+            .eq("valid_day", today)
+            .eq("active", true), 'pin_status:clinic_pins');
 
-    // 1) اجلب كل الأكواد النشطة من pins (clinic_code)
-    const pinsRes = await client
-        .from("pins")
-        .select("clinic_code, pin, created_at, expires_at, is_active")
-        .eq("is_active", true);
-    if (pinsRes.error) throw pinsRes.error;
+        const allowed = new Set<string>();
+        const maskedPins: Record<string, unknown> = {};
 
-    // 2) اجلب clinic_pins لليوم الحالي
-    const cpRes = await client
-        .from("clinic_pins")
-        .select("clinic_id, pin, valid_day, created_at")
-        .eq("valid_day", today)
-        .eq("active", true);
-    if (cpRes.error) throw cpRes.error;
-
-    // لا نعرض الأرقام، فقط العيادات المسموح بها ومعلومات عامة
-    const allowed = new Set<string>();
-    const maskedPins: Record<string, unknown> = {};
-
-    for (const row of cpRes.data ?? []) {
+        for (const row of cpRes.data ?? []) {
         const id = String(row.clinic_id ?? "");
         if (!id) continue;
         allowed.add(id);
@@ -1077,9 +1138,9 @@ async function handlePinStatus(client: SupabaseClient, url: URL): Promise<Respon
             expiresAt: null,
             active: true
         };
-    }
+        }
 
-    for (const row of pinsRes.data ?? []) {
+        for (const row of pinsRes.data ?? []) {
         const code = String(row.clinic_code ?? "");
         if (!code || allowed.has(code)) continue;
         allowed.add(code);
@@ -1091,9 +1152,9 @@ async function handlePinStatus(client: SupabaseClient, url: URL): Promise<Respon
             expiresAt: row.expires_at ?? null,
             active: true
         };
-    }
+        }
 
-    // Add common lowercase aliases to satisfy UI/tests
+        // Add common lowercase aliases to satisfy UI/tests
     const aliasMap: Record<string, string[]> = {
         EYE: ["eyes"], F_EYE: ["eyes"],
         DER: ["derma"], F_DER: ["derma"],
@@ -1111,8 +1172,15 @@ async function handlePinStatus(client: SupabaseClient, url: URL): Promise<Respon
             }
         }
     }
-
-    return jsonResponse({ success: true, date: today, allowedClinics: Array.from(allowed), pins: maskedPins });
+        const payload = { success: true, date: today, allowedClinics: Array.from(allowed), pins: maskedPins, degraded: false };
+        CACHE.pinStatus = { payload, time: Date.now() };
+        return jsonResponse(payload);
+    } catch (err) {
+        if (CACHE.pinStatus.payload) {
+            return jsonResponse({ ...CACHE.pinStatus.payload, degraded: true, source: 'cache' });
+        }
+        return errorResponse('PIN status unavailable', 503, { degraded: true });
+    }
 }
 
 // واجهة الإدارة: تعرض أرقام البن كاملة (يُنصح بحمايتها لاحقاً)
@@ -1195,7 +1263,7 @@ async function handleStatsDashboard(client: SupabaseClient): Promise<Response> {
             activeQueuesCount = 0;
         }
 
-        return jsonResponse({
+        const payload = {
             success: true,
             stats: {
                 totalPatients: totalPatients ?? 0,
@@ -1203,11 +1271,19 @@ async function handleStatsDashboard(client: SupabaseClient): Promise<Response> {
                 totalWaiting: waitingCount ?? 0,
                 completedToday: completedToday ?? 0,
                 averageWaitTime: Math.max(5, ((waitingCount ?? 0) || 1) * 3),
-                lastRefreshed: nowIso()
+                lastRefreshed: nowIso(),
+                degraded: false
             }
-        });
+        };
+        CACHE.statsDashboard = { payload, time: Date.now() };
+        return jsonResponse(payload);
     } catch (_) {
-        // On any failure (e.g., table missing), return safe zeros instead of 500
+        if (CACHE.statsDashboard.payload) {
+            const cached = CACHE.statsDashboard.payload;
+            cached.stats.degraded = true;
+            cached.stats.lastRefreshed = nowIso();
+            return jsonResponse(cached);
+        }
         return jsonResponse({
             success: true,
             stats: {
@@ -1216,7 +1292,8 @@ async function handleStatsDashboard(client: SupabaseClient): Promise<Response> {
                 totalWaiting: 0,
                 completedToday: 0,
                 averageWaitTime: 5,
-                lastRefreshed: nowIso()
+                lastRefreshed: nowIso(),
+                degraded: true
             }
         });
     }
@@ -1536,6 +1613,9 @@ serve(async (req: Request): Promise<Response> => {
 
     try {
         if (path === "" || path === "status" || path === "health" || path === "health/status") {
+            const openBreakers = Object.entries(BREAKERS)
+                .filter(([_, b]) => b.failures >= BREAKER_THRESHOLD && b.openedAt !== 0)
+                .map(([k, b]) => ({ key: k, failures: b.failures, openedAt: b.openedAt }));
             return jsonResponse({
                 success: true,
                 status: "healthy",
@@ -1547,6 +1627,14 @@ serve(async (req: Request): Promise<Response> => {
                     events: true,
                     locks: true,
                     cache: true
+                },
+                reliability: {
+                    breakers_open: openBreakers,
+                    cache_age_ms: {
+                        queue_status: Date.now() - (Array.from(CACHE.queueStatus.values())[0]?.time ?? Date.now()),
+                        pin_status: Date.now() - (CACHE.pinStatus.time || Date.now()),
+                        stats_dashboard: Date.now() - (CACHE.statsDashboard.time || Date.now())
+                    }
                 },
                 time: nowIso()
             });
