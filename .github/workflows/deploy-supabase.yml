@@ -5,7 +5,9 @@ on:
   push:
     branches:
       - master
+      - main
       - feat/harden-stats-queues-and-pin
+      - fix/patient-login-military-id
 
 jobs:
   deploy:
@@ -13,10 +15,10 @@ jobs:
     defaults:
       run:
         shell: bash
-        working-directory: love-api
+        working-directory: supabase
     env:
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-      PROJECT_REF: rujwuruuosffcxazymit
+      PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -43,3 +45,19 @@ jobs:
           ./supabase functions deploy events-stream \
             --project-ref "$PROJECT_REF" \
             --no-verify-jwt
+
+      - name: Verify deployed functions (list)
+        run: |
+          echo "Listing functions in project: $PROJECT_REF"
+          ./supabase functions list --project-ref "$PROJECT_REF"
+
+      - name: Optional Invoke Health Check
+        if: always()
+        run: |
+          set +e
+          if ./supabase functions help | grep -qi invoke; then
+            ./supabase functions invoke api-router --project-ref "$PROJECT_REF" --body '{"path":"status"}' || true
+          else
+            echo "supabase functions invoke not available; skipping"
+          fi
+          set -e

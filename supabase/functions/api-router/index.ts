@@ -97,7 +97,7 @@ function supabase(): SupabaseClient {
 function jsonResponse(body: unknown, status = 200): Response {
     return new Response(JSON.stringify(body), {
         status,
-        headers: { ...corsHeaders, "Content-Type": "application/json" }
+        headers: { ...corsHeaders, "Content-Type": "application/json; charset=utf-8" }
     });
 }
 
@@ -545,6 +545,34 @@ async function handlePatientLogin(client: SupabaseClient, req: Request): Promise
     };
 
     return jsonResponse({ success: true, data: payload });
+}
+
+// --- Diagnostic helpers (transient) ---
+async function diagLogRequest(req: Request, note = "") {
+    try {
+        const url = new URL(req.url);
+        let bodyText = "<empty>";
+        try {
+            const clone = req.clone();
+            const t = await clone.text();
+            bodyText = t.length > 0 ? t : "<empty>";
+        } catch {
+            bodyText = "<non-text-body>";
+        }
+        console.log(`[diag] ${note} ${new Date().toISOString()} ${req.method} ${url.pathname} body=${bodyText}`);
+    } catch (e) {
+        console.log("[diag] failed to log request:", String(e));
+    }
+}
+
+async function handlePatientLoginSafe(client: SupabaseClient, req: Request): Promise<Response> {
+    await diagLogRequest(req, "patient/login");
+    try {
+        return await handlePatientLogin(client, req);
+    } catch (err) {
+        console.error("[patient/login] unhandled", err);
+        return jsonResponse({ success: false, error: (err as any)?.message ?? "Internal server error" }, 500);
+    }
 }
 
 async function handleQueueEnter(client: SupabaseClient, req: Request): Promise<Response> {
@@ -1525,7 +1553,8 @@ serve(async (req: Request): Promise<Response> => {
         }
 
         if (path === "patient/login" && req.method === "POST") {
-            return await handlePatientLogin(client, req);
+            // Diagnostic wrapper ensures structured JSON even on unhandled exceptions
+            return await handlePatientLoginSafe(client, req);
         }
 
         if (path === "queue/enter" && req.method === "POST") {
