@@ -1,84 +1,183 @@
-# MMC-MMS API - Medical Committee Backend (Supabase)
+# Supabase CLI
 
-Backend API for the Military Medical Committee System using Supabase Edge Functions.
+[![Coverage Status](https://coveralls.io/repos/github/supabase/cli/badge.svg?branch=main)](https://coveralls.io/github/supabase/cli?branch=main) [![Bitbucket Pipelines](https://img.shields.io/bitbucket/pipelines/supabase-cli/setup-cli/master?style=flat-square&label=Bitbucket%20Canary)](https://bitbucket.org/supabase-cli/setup-cli/pipelines) [![Gitlab Pipeline Status](https://img.shields.io/gitlab/pipeline-status/sweatybridge%2Fsetup-cli?label=Gitlab%20Canary)
+](https://gitlab.com/sweatybridge/setup-cli/-/pipelines)
 
-## Architecture
+[Supabase](https://supabase.io) is an open source Firebase alternative. We're building the features of Firebase using enterprise-grade open source tools.
 
-- **Platform**: Supabase Edge Functions (Deno runtime)
-- **Database**: PostgreSQL + PostgREST
-- **Real-time**: Supabase Realtime subscriptions
-- **Cron Jobs**: pg_cron for scheduled tasks
-- **CORS**: Handled in Edge Functions
+This repository contains all the functionality for Supabase CLI.
 
-## Deployment
+- [x] Running Supabase locally
+- [x] Managing database migrations
+- [x] Creating and deploying Supabase Functions
+- [x] Generating types directly from your database schema
+- [x] Making authenticated HTTP requests to [Management API](https://supabase.com/docs/reference/api/introduction)
 
-This project is deployed on Supabase **only** - NOT on Vercel.
+## Getting started
 
-## Setup
+### Install the CLI
 
-### Prerequisites
-```bash
-npm install -g supabase
-```
-
-### Link to Supabase Project
-```bash
-supabase login
-supabase link --project-ref YOUR-PROJECT-REF
-```
-
-### Deploy Functions
-```bash
-supabase functions deploy api-v1-status
-```
-
-### Run Migrations
-```bash
-supabase db push
-```
-
-## Edge Functions
-
-- `api-v1-status` - Health check with CORS support
-
-## Database Tables (Realtime Enabled)
-
-- `queues` - Active patient queues
-- `queue_history` - Historical queue data
-- `notifications` - System notifications
-- `pins` - Daily clinic PINs
-
-## Environment Variables (Supabase Secrets)
-
-Set in Supabase Dashboard → Project Settings → API → Secrets:
+Available via [NPM](https://www.npmjs.com) as dev dependency. To install:
 
 ```bash
-# Example service role key storage
-SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+npm i supabase --save-dev
 ```
 
-## Local Development
+To install the beta release channel:
 
 ```bash
-supabase start
-supabase functions serve
+npm i supabase@beta --save-dev
 ```
 
-## Endpoints
+When installing with yarn 4, you need to disable experimental fetch with the following nodejs config.
 
-Base URL: `https://YOUR-PROJECT-REF.functions.supabase.co/`
+```
+NODE_OPTIONS=--no-experimental-fetch yarn add supabase
+```
 
-- `GET /api-v1-status` - Health check
-- More functions to be added...
+> **Note**
+For Bun versions below v1.0.17, you must add `supabase` as a [trusted dependency](https://bun.sh/guides/install/trusted) before running `bun add -D supabase`.
 
-## CORS Configuration
+<details>
+  <summary><b>macOS</b></summary>
 
-All Edge Functions include CORS headers for cross-origin requests from the frontend.
+  Available via [Homebrew](https://brew.sh). To install:
 
-## Scheduled Tasks
+  ```sh
+  brew install supabase/tap/supabase
+  ```
 
-Cron jobs are managed via pg_cron extension:
+  To install the beta release channel:
+  
+  ```sh
+  brew install supabase/tap/supabase-beta
+  brew link --overwrite supabase-beta
+  ```
+  
+  To upgrade:
 
-- Daily maintenance at 05:00 UTC
-- Custom schedules as needed
+  ```sh
+  brew upgrade supabase
+  ```
+</details>
 
+<details>
+  <summary><b>Windows</b></summary>
+
+  Available via [Scoop](https://scoop.sh). To install:
+
+  ```powershell
+  scoop bucket add supabase https://github.com/supabase/scoop-bucket.git
+  scoop install supabase
+  ```
+
+  To upgrade:
+
+  ```powershell
+  scoop update supabase
+  ```
+</details>
+
+<details>
+  <summary><b>Linux</b></summary>
+
+  Available via [Homebrew](https://brew.sh) and Linux packages.
+
+  #### via Homebrew
+
+  To install:
+
+  ```sh
+  brew install supabase/tap/supabase
+  ```
+
+  To upgrade:
+
+  ```sh
+  brew upgrade supabase
+  ```
+
+  #### via Linux packages
+
+  Linux packages are provided in [Releases](https://github.com/supabase/cli/releases). To install, download the `.apk`/`.deb`/`.rpm`/`.pkg.tar.zst` file depending on your package manager and run the respective commands.
+
+  ```sh
+  sudo apk add --allow-untrusted <...>.apk
+  ```
+
+  ```sh
+  sudo dpkg -i <...>.deb
+  ```
+
+  ```sh
+  sudo rpm -i <...>.rpm
+  ```
+
+  ```sh
+  sudo pacman -U <...>.pkg.tar.zst
+  ```
+</details>
+
+<details>
+  <summary><b>Other Platforms</b></summary>
+
+  You can also install the CLI via [go modules](https://go.dev/ref/mod#go-install) without the help of package managers.
+
+  ```sh
+  go install github.com/supabase/cli@latest
+  ```
+
+  Add a symlink to the binary in `$PATH` for easier access:
+
+  ```sh
+  ln -s "$(go env GOPATH)/bin/cli" /usr/bin/supabase
+  ```
+
+  This works on other non-standard Linux distros.
+</details>
+
+<details>
+  <summary><b>Community Maintained Packages</b></summary>
+
+  Available via [pkgx](https://pkgx.sh/). Package script [here](https://github.com/pkgxdev/pantry/blob/main/projects/supabase.com/cli/package.yml).
+  To install in your working directory:
+
+  ```bash
+  pkgx install supabase
+  ```
+
+  Available via [Nixpkgs](https://nixos.org/). Package script [here](https://github.com/NixOS/nixpkgs/blob/master/pkgs/development/tools/supabase-cli/default.nix).
+</details>
+
+### Run the CLI
+
+```bash
+supabase bootstrap
+```
+
+Or using npx:
+
+```bash
+npx supabase bootstrap
+```
+
+The bootstrap command will guide you through the process of setting up a Supabase project using one of the [starter](https://github.com/supabase-community/supabase-samples/blob/main/samples.json) templates.
+
+## Docs
+
+Command & config reference can be found [here](https://supabase.com/docs/reference/cli/about).
+
+## Breaking changes
+
+We follow semantic versioning for changes that directly impact CLI commands, flags, and configurations.
+
+However, due to dependencies on other service images, we cannot guarantee that schema migrations, seed.sql, and generated types will always work for the same CLI major version. If you need such guarantees, we encourage you to pin a specific version of CLI in package.json.
+
+## Developing
+
+To run from source:
+
+```sh
+# Go >= 1.22
+go run . help
+```
