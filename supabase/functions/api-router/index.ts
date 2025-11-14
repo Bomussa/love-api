@@ -134,15 +134,15 @@ async function safeHandlePatientLogin(client: SupabaseClient, req: Request): Pro
     try {
         await diagLogRequest(req, "patient/login");
         const result = await handlePatientLogin(client, req);
-        if (!result || !result.body) {
+        if (!result) {
             console.error("[DIAG patient/login] Handler returned invalid response");
-            return jsonError("Internal error: empty response from handler", 500);
+            return errorResponse("Internal error: empty response from handler", 500);
         }
         return result;
     } catch (err) {
         console.error("[DIAG patient/login] Exception:", err);
         const status = (err as { status?: number }).status ?? 500;
-        return jsonError((err as Error).message ?? "Unknown error in patient login", status);
+        return errorResponse((err as Error).message ?? "Unknown error in patient login", status);
     }
 }
 
