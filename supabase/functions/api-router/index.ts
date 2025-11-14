@@ -106,9 +106,6 @@ function errorResponse(message: string, status = 400, details?: Record<string, u
 }
 
 /* --- DIAGNOSTIC HELPERS ADDED --- */
-function jsonError(message: string, status = 500): Response {
-    return jsonResponse({ success: false, error: String(message) }, status);
-}
 
 async function diagLogRequest(req: Request, note = ""): Promise<void> {
     try {
