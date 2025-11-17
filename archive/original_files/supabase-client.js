@@ -9,17 +9,9 @@
  */
 
 // ✅ متغيرات صحيحة للـ Backend (بدون VITE_)
-// Note: Fallback values removed for production security
-// Set these in Vercel environment variables
-const SUPABASE_URL = process.env.SUPABASE_URL || (process.env.NODE_ENV === 'development' ? 'https://rujwuruuosffcxazymit.supabase.co' : null);
-const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || (process.env.NODE_ENV === 'development' ? 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ1and1cnV1b3NmZmN4YXp5bWl0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjEzODcyNjUsImV4cCI6MjA3Njk2MzI2NX0.HnrSwc7OZTqZRzCwzBH8hqtgtHMBix4yxy0RKvRDX10' : null);
+const SUPABASE_URL = process.env.SUPABASE_URL || 'https://rujwuruuosffcxazymit.supabase.co';
+const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ1and1cnV1b3NmZmN4YXp5bWl0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjEzODcyNjUsImV4cCI6MjA3Njk2MzI2NX0.HnrSwc7OZTqZRzCwzBH8hqtgtHMBix4yxy0RKvRDX10';
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY; // للعمليات الإدارية
-
-// Validate required environment variables
-if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
-  console.error('❌ Missing required Supabase credentials');
-  console.error('Please set SUPABASE_URL and SUPABASE_ANON_KEY in Vercel environment variables');
-}
 
 export async function supabaseQuery(table, options = {}) {
     const { select = '*', filter = {}, limit, order } = options;
