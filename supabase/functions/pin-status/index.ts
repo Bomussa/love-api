@@ -38,7 +38,7 @@ serve(async (req: Request) => {
             .select('pin, created_at, expires_at')
             .eq('clinic', clinic)
             .eq('date', today)
-            .single();
+            .limit(1).limit(1).single();
 
         if (pinError && pinError.code !== 'PGRST116') { // Not found error
             throw pinError;
@@ -60,7 +60,7 @@ serve(async (req: Request) => {
                     expires_at: expiresAt.toISOString()
                 })
                 .select('pin, created_at, expires_at')
-                .single();
+                .limit(1).limit(1).single();
 
             if (createError) throw createError;
             pin = createdPin;
