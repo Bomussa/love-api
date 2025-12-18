@@ -13,15 +13,42 @@ import {
 } from './lib/helpers.js';
 import { supabaseQuery, supabaseInsert, supabaseUpdate } from './supabase-client.js';
 
-export default async function handler(req, res) {
-  // CORS headers
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+// Allowed origins for CORS
+const ALLOWED_ORIGINS = [
+  'https://mmc-mms.com',
+  'https://www.mmc-mms.com',
+  'http://localhost:3000',
+  'http://localhost:5173'
+];
 
-  // Handle OPTIONS
+// Check if origin is allowed (including Vercel preview URLs)
+function isOriginAllowed(origin) {
+  if (!origin) return true; // Allow requests with no origin (like mobile apps)
+  if (ALLOWED_ORIGINS.includes(origin)) return true;
+  if (/\.vercel\.app$/.test(origin)) return true; // Allow Vercel preview URLs
+  return false;
+}
+
+export default async function handler(req, res) {
+  const origin = req.headers.origin;
+  
+  // CORS headers - Secure configuration
+  if (isOriginAllowed(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin || '*');
+  }
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  
+  // Security headers
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('X-XSS-Protection', '1; mode=block');
+
+  // Handle OPTIONS (preflight)
   if (req.method === 'OPTIONS') {
-    return res.status(200).end();
+    res.setHeader('Access-Control-Max-Age', '86400'); // Cache preflight for 24 hours
+    return res.status(204).end();
   }
 
   const { pathname: originalPathname } = new URL(req.url, `https://${req.headers.host}`);
