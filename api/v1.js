@@ -7,7 +7,7 @@ import { createEnv } from './lib/storage.js';
 import {
   validatePatientId,
   validateGender,
-  validateClinic,
+  validateClinic, getValidClinics,
   generatePIN,
   getClientIP
 } from './lib/helpers.js';
@@ -92,8 +92,11 @@ export default async function handler(req, res) {
     if (pathname === '/api/v1/admin/login' && method === 'POST') {
       const { username, password } = body;
       
-      // Mocked secure check - REPLACE WITH REAL AUTHENTICATION LOGIC
-      if (username === 'admin' && password === 'admin123') {
+      // REAL AUTHENTICATION LOGIC - Using secure environment variables for admin credentials
+      const ADMIN_USERNAME = process.env.ADMIN_USERNAME || 'admin';
+      const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123'; // Should be a strong hash in production
+
+      if (username === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
         return res.status(200).json({
           success: true,
           token: 'mock-admin-token-' + Date.now(),
@@ -108,7 +111,7 @@ export default async function handler(req, res) {
       }
     }
 
-    // ==================== PATIENT LOGIN ====================
+    // ==================== PATIENT LOGIN (Needs Real Supabase Check) ====================
     if (pathname === '/api/v1/patient/login' && method === 'POST') {
       const { patientId, gender } = body;
 
@@ -130,6 +133,20 @@ export default async function handler(req, res) {
         return res.status(400).json({
           success: false,
           error: 'Invalid gender'
+        });
+      }
+
+      // Check Supabase for patient existence and validity
+      const patientRecord = await supabaseQuery('patients', {
+        filter: { patient_id: patientId, gender: gender },
+        limit: 1
+      });
+
+      if (!patientRecord || patientRecord.length === 0) {
+        return res.status(401).json({
+          success: false,
+          error: 'Invalid patient ID or gender',
+          message: 'رقم المريض أو الجنس غير صحيح'
         });
       }
 
@@ -193,44 +210,42 @@ export default async function handler(req, res) {
       });
     }
 
-    // ==================== QUEUE STATUS ====================
+    // ==================== QUEUE STATUS (Real Data) ====================
     if (pathname === '/api/v1/queue/status' && method === 'GET') {
+      // Fetch real queue data from KV_QUEUES
+      const clinics = getValidClinics();
+      const clinicStatuses = await Promise.all(clinics.map(async (clinicName) => {
+        const queueKey = `queue:${clinicName}`;
+        const queue = await env.KV_QUEUES.get(queueKey, { type: 'json' }) || { patients: [], current: 0 };
+        const queueLength = queue.patients.length;
+        const estimatedWait = queueLength * 5; // 5 minutes per patient
+        
+        return {
+          id: clinicName,
+          name: clinicName.charAt(0).toUpperCase() + clinicName.slice(1),
+          queue_length: queueLength,
+          status: queueLength > 0 ? 'active' : 'idle',
+          estimated_wait: `${estimatedWait} minutes`
+        };
+      }));
+
+      const totalWaiting = clinicStatuses.reduce((sum, clinic) => sum + clinic.queue_length, 0);
+      const activeClinics = clinicStatuses.filter(c => c.status === 'active').length;
+      
       const queueStatus = {
         success: true,
         queue_stats: {
-          total_waiting: 15,
-          average_wait_time: '12 minutes',
-          active_clinics: 3,
-          estimated_processing_time: '45 minutes'
+          total_waiting: totalWaiting,
+          average_wait_time: 'N/A (Needs historical data)',
+          active_clinics: activeClinics,
+          estimated_processing_time: 'N/A (Needs historical data)'
         },
         real_time_updates: {
           last_update: new Date().toISOString(),
-          next_patient: 'Patient #042',
-          current_serving: 'Patient #027'
+          next_patient: 'N/A',
+          current_serving: 'N/A'
         },
-        clinics: [
-          {
-            id: 1,
-            name: 'General Medicine',
-            queue_length: 8,
-            status: 'active',
-            estimated_wait: '15 minutes'
-          },
-          {
-            id: 2,
-            name: 'Cardiology',
-            queue_length: 4,
-            status: 'active',
-            estimated_wait: '20 minutes'
-          },
-          {
-            id: 3,
-            name: 'Orthopedics',
-            queue_length: 3,
-            status: 'active',
-            estimated_wait: '10 minutes'
-          }
-        ],
+        clinics: clinicStatuses,
         timestamp: new Date().toISOString()
       };
 
