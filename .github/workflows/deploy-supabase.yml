@@ -45,6 +45,24 @@ jobs:
             --project-ref "$PROJECT_REF" \
             --no-verify-jwt
 
+      - name: Deploy call-next-patient
+        run: |
+          ./supabase functions deploy call-next-patient \
+            --project-ref "$PROJECT_REF" \
+            --no-verify-jwt
+
+      - name: Deploy issue-pin
+        run: |
+          ./supabase functions deploy issue-pin \
+            --project-ref "$PROJECT_REF" \
+            --no-verify-jwt
+            
+      - name: Deploy patient-login
+        run: |
+          ./supabase functions deploy patient-login \
+            --project-ref "$PROJECT_REF" \
+            --no-verify-jwt
+
       - name: Verify deployed functions (list)
         run: |
           echo "Listing functions in project: $PROJECT_REF"
