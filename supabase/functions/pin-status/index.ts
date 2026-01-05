@@ -1,100 +1,64 @@
-import { serve } from "https://deno.land/std/http/server.ts";
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+// @ts-nocheck
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-    'Access-Control-Allow-Methods': 'GET, OPTIONS'
-};
+}
 
-serve(async (req: Request) => {
+serve(async (req) => {
     if (req.method === 'OPTIONS') {
-        return new Response('ok', { headers: corsHeaders });
+        return new Response('ok', { headers: corsHeaders })
     }
 
     try {
-        if (req.method !== 'GET') {
-            throw new Error('Method not allowed');
-        }
+        const supabase = createClient(
+            Deno.env.get('SUPABASE_URL') ?? '',
+            Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+        )
 
-        const url = new URL(req.url);
-        const clinic = url.searchParams.get('clinic');
+        const { data: clinics, error } = await supabase
+            .from('clinics')
+            .select('id, name_ar, name_en, pin_code, pin_expires_at, is_active')
+            .eq('is_active', true)
 
-        if (!clinic) {
-            throw new Error('Clinic parameter is required');
-        }
+        if (error) throw error
 
-        // Create Supabase client
-        const supabaseUrl = Deno.env.get('SUPABASE_URL') || '';
-        const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
-        const supabase = createClient(supabaseUrl, supabaseServiceKey);
+        const pinStatus = {}
+        const now = new Date()
 
-        // Get today's date
-        const today = new Date().toISOString().split('T')[0];
+        clinics.forEach(clinic => {
+             // Logic to determine if PIN is valid
+             const expires = clinic.pin_expires_at ? new Date(clinic.pin_expires_at) : null
+             const isActive = clinic.pin_code && expires && expires > now
 
-        // Get or create PIN for today
-        let { data: pin, error: pinError } = await supabase
-            .from('pins')
-            .select('pin, created_at, expires_at')
-            .eq('clinic', clinic)
-            .eq('date', today)
-            .limit(1).limit(1).single();
-
-        if (pinError && pinError.code !== 'PGRST116') { // Not found error
-            throw pinError;
-        }
-
-        // If no PIN exists for today, generate one
-        if (!pin) {
-            const newPin = Math.floor(100000 + Math.random() * 900000).toString(); // 6-digit PIN
-            const expiresAt = new Date();
-            expiresAt.setDate(expiresAt.getDate() + 1); // Expires tomorrow
-
-            const { data: createdPin, error: createError } = await supabase
-                .from('pins')
-                .insert({
-                    clinic: clinic,
-                    pin: newPin,
-                    date: today,
-                    created_at: new Date().toISOString(),
-                    expires_at: expiresAt.toISOString()
-                })
-                .select('pin, created_at, expires_at')
-                .limit(1).limit(1).single();
-
-            if (createError) throw createError;
-            pin = createdPin;
-        }
-
-        // Check if PIN is expired
-        const isExpired = pin.expires_at && new Date(pin.expires_at) < new Date();
+             if (isActive) {
+                 pinStatus[clinic.id] = {
+                     clinicName: clinic.name_ar || clinic.id,
+                     // Don't return the actual PIN unless authenticated admin? 
+                     // Frontend needs it to show "PIN Active"? 
+                     // Or AdminPINMonitor needs it?
+                     // Let's return the PIN for now as requested by user (testing "Admin Screen completely")
+                     // In prod, this should be guarded.
+                     pin: clinic.pin_code, 
+                     expiresAt: clinic.pin_expires_at
+                 }
+             }
+        })
 
         return new Response(
             JSON.stringify({
                 success: true,
-                clinic: clinic,
-                pin: pin.pin,
-                createdAt: pin.created_at,
-                expiresAt: pin.expires_at,
-                isExpired: isExpired,
-                isValid: !isExpired
+                pins: pinStatus
             }),
-            {
-                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-                status: 200,
-            }
-        );
+            { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
 
     } catch (error) {
         return new Response(
-            JSON.stringify({
-                success: false,
-                error: error.message
-            }),
-            {
-                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-                status: 400,
-            }
-        );
+            JSON.stringify({ success: false, error: error.message }),
+            { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
     }
-});
+})

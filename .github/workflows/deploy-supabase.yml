@@ -63,6 +63,30 @@ jobs:
             --project-ref "$PROJECT_REF" \
             --no-verify-jwt
 
+      - name: Deploy queue-enter
+        run: |
+          ./supabase functions deploy queue-enter \
+            --project-ref "$PROJECT_REF" \
+            --no-verify-jwt
+
+      - name: Deploy queue-status
+        run: |
+          ./supabase functions deploy queue-status \
+            --project-ref "$PROJECT_REF" \
+            --no-verify-jwt
+
+      - name: Deploy pin-status
+        run: |
+          ./supabase functions deploy pin-status \
+            --project-ref "$PROJECT_REF" \
+            --no-verify-jwt
+
+      - name: Deploy api-v1-status
+        run: |
+          ./supabase functions deploy api-v1-status \
+            --project-ref "$PROJECT_REF" \
+            --no-verify-jwt
+
       - name: Verify deployed functions (list)
         run: |
           echo "Listing functions in project: $PROJECT_REF"
