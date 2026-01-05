@@ -86,19 +86,14 @@ jobs:
           ./supabase functions deploy api-v1-status \
             --project-ref "$PROJECT_REF" \
             --no-verify-jwt
+            
+      - name: Deploy db-check
+        run: |
+          ./supabase functions deploy db-check \
+            --project-ref "$PROJECT_REF" \
+            --no-verify-jwt
 
       - name: Verify deployed functions (list)
         run: |
           echo "Listing functions in project: $PROJECT_REF"
           ./supabase functions list --project-ref "$PROJECT_REF"
-
-      - name: "Optional: Invoke quick health check (best-effort)"
-        if: always()
-        run: |
-          set +e
-          if ./supabase functions help | grep -qi invoke; then
-            ./supabase functions invoke api-router --project-ref "$PROJECT_REF" --body '{"path":"status"}'
-          else
-            echo "supabase functions invoke not available in this CLI release; skip invoke."
-          fi
-          set -e

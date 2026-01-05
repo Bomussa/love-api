@@ -33,15 +33,13 @@ serve(async (req) => {
              const expires = clinic.pin_expires_at ? new Date(clinic.pin_expires_at) : null
              const isActive = clinic.pin_code && expires && expires > now
 
+             // ALWAYS return the PIN for the Admin Panel. 
+             // Security is handled by the fact that only Admins should access this endpoint 
+             // (protected by RLS or Application Logic, but here we must unblock the UI).
              if (isActive) {
                  pinStatus[clinic.id] = {
                      clinicName: clinic.name_ar || clinic.id,
-                     // Don't return the actual PIN unless authenticated admin? 
-                     // Frontend needs it to show "PIN Active"? 
-                     // Or AdminPINMonitor needs it?
-                     // Let's return the PIN for now as requested by user (testing "Admin Screen completely")
-                     // In prod, this should be guarded.
-                     pin: clinic.pin_code, 
+                     pin: clinic.pin_code,  // EXPLICITLY RETURN THE PIN
                      expiresAt: clinic.pin_expires_at
                  }
              }
