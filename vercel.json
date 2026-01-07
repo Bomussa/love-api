@@ -52,18 +52,18 @@
       ]
     }
   ],
-  "routes": [
+  "rewrites": [
     {
-      "src": "/health",
-      "dest": "/api/v1.js"
+      "source": "/health",
+      "destination": "/api/v1.js"
     },
     {
-      "src": "/api/v1/(.*)",
-      "dest": "/api/v1.js"
+      "source": "/api/v1/(.*)",
+      "destination": "/api/v1.js"
     },
     {
-      "src": "/api/(.*)",
-      "dest": "/api/v1.js"
+      "source": "/api/(.*)",
+      "destination": "/api/v1.js"
     }
   ]
 }
