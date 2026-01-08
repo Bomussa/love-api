@@ -1,122 +1,101 @@
 /**
- * Supabase Client Helper - إصدار مُصحح
- * للاتصال بقاعدة البيانات الحقيقية
- * 
- * التغييرات المطلوبة:
- * - استبدال VITE_SUPABASE_URL بـ SUPABASE_URL
- * - استبدال VITE_SUPABASE_ANON_KEY بـ SUPABASE_ANON_KEY  
- * - إضافة دعم SERVICE_ROLE_KEY للعمليات الإدارية
+ * Supabase Client Helper - Unified Service Role Version
+ * المصدر الوحيد للحقيقة: استخدام Service Role Key لجميع عمليات الـ Backend
  */
 
-// ✅ متغيرات صحيحة للـ Backend (بدون VITE_)
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://rujwuruuosffcxazymit.supabase.co';
-const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ1and1cnV1b3NmZmN4YXp5bWl0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjEzODcyNjUsImV4cCI6MjA3Njk2MzI2NX0.HnrSwc7OZTqZRzCwzBH8hqtgtHMBix4yxy0RKvRDX10';
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY; // للعمليات الإدارية
+// استخدام Service Role Key حصرياً في الـ Backend لضمان الوصول الكامل وتجاوز RLS
+const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SERVICE_ROLE_SECRET;
+
+if (!SUPABASE_KEY) {
+    console.error('CRITICAL: SUPABASE_SERVICE_ROLE_KEY is missing in environment variables');
+}
+
+const commonHeaders = {
+    'apikey': SUPABASE_KEY,
+    'Authorization': `Bearer ${SUPABASE_KEY}`,
+    'Content-Type': 'application/json',
+    'Prefer': 'return=representation'
+};
 
 export async function supabaseQuery(table, options = {}) {
     const { select = '*', filter = {}, limit, order } = options;
-
     let url = `${SUPABASE_URL}/rest/v1/${table}?select=${select}`;
-
-    // Add filters
+    
     Object.entries(filter).forEach(([key, value]) => {
         url += `&${key}=eq.${value}`;
     });
 
-    // Add limit
-    if (limit) {
-        url += `&limit=${limit}`;
-    }
+    if (limit) url += `&limit=${limit}`;
+    if (order) url += `&order=${order}`;
 
-    // Add order
-    if (order) {
-        url += `&order=${order}`;
-    }
-
-    const response = await fetch(url, {
-        headers: {
-            'apikey': SUPABASE_ANON_KEY,
-            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-            'Content-Type': 'application/json'
-        }
-    });
-
+    const response = await fetch(url, { headers: commonHeaders });
     if (!response.ok) {
-        throw new Error(`Supabase query failed: ${response.statusText}`);
+        const error = await response.json();
+        throw new Error(`Supabase query failed: ${JSON.stringify(error)}`);
     }
-
     return await response.json();
 }
 
 export async function supabaseInsert(table, data) {
     const url = `${SUPABASE_URL}/rest/v1/${table}`;
-
     const response = await fetch(url, {
         method: 'POST',
-        headers: {
-            'apikey': SUPABASE_ANON_KEY,
-            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-            'Content-Type': 'application/json',
-            'Prefer': 'return=representation'
-        },
+        headers: commonHeaders,
         body: JSON.stringify(data)
     });
-
     if (!response.ok) {
-        throw new Error(`Supabase insert failed: ${response.statusText}`);
+        const error = await response.json();
+        throw new Error(`Supabase insert failed: ${JSON.stringify(error)}`);
     }
-
     return await response.json();
 }
 
 export async function supabaseUpdate(table, filter, data) {
     let url = `${SUPABASE_URL}/rest/v1/${table}?`;
-
     Object.entries(filter).forEach(([key, value], index) => {
         if (index > 0) url += '&';
         url += `${key}=eq.${value}`;
     });
-
     const response = await fetch(url, {
         method: 'PATCH',
-        headers: {
-            'apikey': SUPABASE_ANON_KEY,
-            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-            'Content-Type': 'application/json',
-            'Prefer': 'return=representation'
-        },
+        headers: commonHeaders,
         body: JSON.stringify(data)
     });
-
     if (!response.ok) {
-        throw new Error(`Supabase update failed: ${response.statusText}`);
+        const error = await response.json();
+        throw new Error(`Supabase update failed: ${JSON.stringify(error)}`);
     }
-
     return await response.json();
 }
 
-// دالة إضافية للعمليات الإدارية (تتطلب SERVICE_ROLE_KEY)
-export async function supabaseAdminOperation(table, operation, data) {
-    if (!SUPABASE_SERVICE_ROLE_KEY) {
-        throw new Error('SERVICE_ROLE_KEY is required for admin operations');
-    }
-
-    const url = `${SUPABASE_URL}/rest/v1/${table}`;
-
-    const response = await fetch(url, {
-        method: operation,
-        headers: {
-            'apikey': SUPABASE_SERVICE_ROLE_KEY,
-            'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-            'Content-Type': 'application/json',
-            'Prefer': 'return=representation'
-        },
-        body: JSON.stringify(data)
+export async function supabaseDelete(table, filter) {
+    let url = `${SUPABASE_URL}/rest/v1/${table}?`;
+    Object.entries(filter).forEach(([key, value], index) => {
+        if (index > 0) url += '&';
+        url += `${key}=eq.${value}`;
     });
-
+    const response = await fetch(url, {
+        method: 'DELETE',
+        headers: commonHeaders
+    });
     if (!response.ok) {
-        throw new Error(`Supabase admin operation failed: ${response.statusText}`);
+        const error = await response.json();
+        throw new Error(`Supabase delete failed: ${JSON.stringify(error)}`);
     }
+    return true;
+}
 
+export async function supabaseRpc(functionName, params = {}) {
+    const url = `${SUPABASE_URL}/rest/v1/rpc/${functionName}`;
+    const response = await fetch(url, {
+        method: 'POST',
+        headers: commonHeaders,
+        body: JSON.stringify(params)
+    });
+    if (!response.ok) {
+        const error = await response.json();
+        throw new Error(`Supabase RPC failed: ${JSON.stringify(error)}`);
+    }
     return await response.json();
 }
