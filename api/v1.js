@@ -87,6 +87,23 @@ function validateDailyPIN(clinicId, pin) {
 }
 
 // ==================== QUEUE ENGINE LOGIC ====================
+async function getNextDisplayNumber(clinicId) {
+  const today = new Date().toISOString().split('T')[0];
+  const queue = await supabaseQuery('queues', {
+    filter: { clinic_id: clinicId },
+    order: 'display_number.desc',
+    limit: 1
+  });
+  
+  if (queue.length === 0) return 1;
+  
+  // Check if the last entry was today
+  const lastEntryDate = new Date(queue[0].entered_at).toISOString().split('T')[0];
+  if (lastEntryDate !== today) return 1;
+  
+  return (queue[0].display_number || 0) + 1;
+}
+
 async function getQueueStatus(clinicId, patientId) {
   const queue = await supabaseQuery('queues', {
     filter: { clinic_id: clinicId, patient_id: patientId },
