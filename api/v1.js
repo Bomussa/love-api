@@ -88,7 +88,7 @@ function validateDailyPIN(clinicId, pin) {
 
 // ==================== QUEUE ENGINE LOGIC ====================
 async function getQueueStatus(clinicId, patientId) {
-  const queue = await supabaseQuery('queue', {
+  const queue = await supabaseQuery('queues', {
     filter: { clinic_id: clinicId, patient_id: patientId },
     order: 'entered_at.desc',
     limit: 1
@@ -97,8 +97,8 @@ async function getQueueStatus(clinicId, patientId) {
   if (queue.length === 0) return null;
   
   const patient = queue[0];
-  const allInQueue = await supabaseQuery('queue', {
-    filter: { clinic_id: clinicId, status: 'WAITING' },
+  const allInQueue = await supabaseQuery('queues', {
+    filter: { clinic_id: clinicId, status: 'waiting' },
     order: 'entered_at.asc'
   });
   
@@ -223,15 +223,32 @@ export default async function handler(req, res) {
       const { clinicId, patientId, examType } = body;
       if (!clinicId || !patientId) return sendError('Clinic ID and Patient ID are required');
       
-      const entry = await supabaseInsert('queue', {
+      const entry = await supabaseInsert('queues', {
         clinic_id: clinicId,
         patient_id: patientId,
-        exam_type: examType || 'general',
-        status: 'WAITING',
+        display_number: await getNextDisplayNumber(clinicId),
+        status: 'waiting',
         entered_at: new Date().toISOString()
       });
       
       return sendSuccess(entry[0] || entry);
+    }
+
+    if (pathname === '/api/v1/queue/done' && method === 'POST') {
+      const { clinicId, patientId, pin } = body;
+      if (!clinicId || !patientId || !pin) return sendError('Clinic ID, Patient ID and PIN are required');
+      
+      if (!validateDailyPIN(clinicId, pin)) {
+        return sendError('Invalid PIN', 401);
+      }
+      
+      const updated = await supabaseUpdate('queues', { clinic_id: clinicId, patient_id: patientId, status: 'serving' }, {
+        status: 'completed',
+        completed_at: new Date().toISOString(),
+        completed_by_pin: pin
+      });
+      
+      return sendSuccess(updated[0] || updated);
     }
 
     if (pathname === '/api/v1/queue/status' && method === 'GET') {
@@ -252,22 +269,23 @@ export default async function handler(req, res) {
         return sendError('Invalid PIN', 401);
       }
       
-      // Mark current YOUR_TURN as DONE
-      const current = await supabaseQuery('queue', {
-        filter: { clinic_id: clinicId, status: 'YOUR_TURN' },
+      // Mark current serving as completed
+      const current = await supabaseQuery('queues', {
+        filter: { clinic_id: clinicId, status: 'serving' },
         limit: 1
       });
       
       if (current.length > 0) {
-        await supabaseUpdate('queue', { id: current[0].id }, {
-          status: 'DONE',
-          completed_at: new Date().toISOString()
+        await supabaseUpdate('queues', { id: current[0].id }, {
+          status: 'completed',
+          completed_at: new Date().toISOString(),
+          completed_by_pin: pin
         });
       }
       
-      // Get next WAITING patient
-      const nextPatients = await supabaseQuery('queue', {
-        filter: { clinic_id: clinicId, status: 'WAITING' },
+      // Get next waiting patient
+      const nextPatients = await supabaseQuery('queues', {
+        filter: { clinic_id: clinicId, status: 'waiting' },
         order: 'entered_at.asc',
         limit: 1
       });
@@ -276,8 +294,8 @@ export default async function handler(req, res) {
         return sendSuccess({ message: 'No patients in waiting queue' });
       }
       
-      const updated = await supabaseUpdate('queue', { id: nextPatients[0].id }, {
-        status: 'YOUR_TURN',
+      const updated = await supabaseUpdate('queues', { id: nextPatients[0].id }, {
+        status: 'serving',
         called_at: new Date().toISOString()
       });
       
@@ -300,7 +318,7 @@ export default async function handler(req, res) {
       const { clinicId } = parsedUrl.searchParams;
       if (!clinicId) return sendError('Clinic ID is required');
       
-      const queue = await supabaseQuery('queue', {
+      const queue = await supabaseQuery('queues', {
         filter: { clinic_id: clinicId },
         order: 'entered_at.asc'
       });
@@ -349,7 +367,7 @@ export default async function handler(req, res) {
     if (pathname === '/api/v1/reports/summary' && method === 'GET') {
       const { clinicId } = parsedUrl.searchParams;
       
-      let query = 'queue';
+      let query = 'queues';
       let filter = {};
       if (clinicId) filter.clinic_id = clinicId;
       
@@ -357,10 +375,10 @@ export default async function handler(req, res) {
       
       const summary = {
         total: queue.length,
-        waiting: queue.filter(q => q.status === 'WAITING').length,
-        yourTurn: queue.filter(q => q.status === 'YOUR_TURN').length,
-        done: queue.filter(q => q.status === 'DONE').length,
-        cancelled: queue.filter(q => q.status === 'CANCELLED').length,
+        waiting: queue.filter(q => q.status === 'waiting').length,
+        serving: queue.filter(q => q.status === 'serving').length,
+        completed: queue.filter(q => q.status === 'completed').length,
+        skipped: queue.filter(q => q.status === 'skipped').length,
         generatedAt: new Date().toISOString()
       };
       
