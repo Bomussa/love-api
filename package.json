@@ -8,6 +8,6 @@
     "node": ">=18.0.0"
   },
   "dependencies": {
-    "vercel": "^50.1.2"
+    "vercel": "^50.3.3"
   }
 }
