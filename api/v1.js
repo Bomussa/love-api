@@ -22,6 +22,30 @@ async function supabaseRequest(path, options = {}) {
   return await response.json();
 }
 
+// دالة مساعدة لاستدعاء RPC functions في Supabase
+async function supabaseRPC(functionName, params = {}) {
+  const url = `${SUPABASE_URL}/rest/v1/rpc/${functionName}`;
+  const headers = {
+    'apikey': SUPABASE_KEY,
+    'Authorization': `Bearer ${SUPABASE_KEY}`,
+    'Content-Type': 'application/json',
+    'Prefer': 'return=representation'
+  };
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(params)
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(`Supabase RPC Error: ${JSON.stringify(error)}`);
+  }
+
+  return await response.json();
+}
+
 // ==================== BUSINESS LOGIC ====================
 function generateDailyPIN(clinicId) {
   const today = new Date().toISOString().split('T')[0];
@@ -106,6 +130,31 @@ export default async function handler(req, res) {
         body: JSON.stringify({ patient_id: patientId, gender: gender || 'male', status: 'active', created_at: new Date().toISOString() })
       });
       return sendResponse(newUser[0] || newUser);
+    }
+
+    // 4. Queue Operations - NEW SYSTEM
+    if (pathname === '/api/v1/queue/get-number' && method === 'POST') {
+      const { patientId, clinicId, examType } = body;
+      if (!patientId || !clinicId || !examType) return sendError('Patient ID, Clinic ID, and Exam Type are required');
+
+      try {
+        const queueNumber = await supabaseRPC('get_next_queue_number', {
+          p_patient_id: patientId,
+          p_clinic_id: clinicId,
+          p_exam_type: examType
+        });
+
+        return sendResponse({
+          patientId,
+          clinicId,
+          examType,
+          queueNumber: queueNumber || 0,
+          date: new Date().toISOString().split('T')[0]
+        });
+      } catch (error) {
+        console.error('Error getting queue number:', error);
+        return sendError('Failed to get queue number', 500);
+      }
     }
 
     // 4. Queue Operations
