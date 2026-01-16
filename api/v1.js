@@ -84,8 +84,48 @@ async function getQueueStatus(clinicId, patientId) {
   };
 }
 
+// ==================== SETTINGS HELPERS ====================
+async function getSettings() {
+  try {
+    const data = await supabaseRequest('settings?category=eq.queue');
+    const settings = {};
+    data.forEach(s => {
+      settings[s.key] = parseInt(s.value) || s.value;
+    });
+    return {
+      callIntervalSeconds: settings.call_interval_seconds || 120,
+      moveToEndSeconds: settings.move_to_end_seconds || 240,
+      examDurationSeconds: settings.exam_duration_seconds || 300
+    };
+  } catch (error) {
+    // Return defaults if settings table doesn't exist
+    return {
+      callIntervalSeconds: 120,
+      moveToEndSeconds: 240,
+      examDurationSeconds: 300
+    };
+  }
+}
+
+async function updateSetting(key, value) {
+  const updated = await supabaseRequest(`settings?key=eq.${key}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ value: value.toString(), updated_at: new Date().toISOString() })
+  });
+  return updated;
+}
+
 // ==================== API HANDLER ====================
 export default async function handler(req, res) {
+  // CORS headers
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, PUT, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
   const { method, url } = req;
   const parsedUrl = new URL(url, `https://${req.headers.host}`);
   const pathname = parsedUrl.pathname;
@@ -103,6 +143,46 @@ export default async function handler(req, res) {
   try {
     // 1. Health Check
     if (pathname === '/api/v1/health') return sendResponse({ status: 'ok' });
+
+    // ==================== SETTINGS ENDPOINTS ====================
+    // Get all settings
+    if (pathname === '/api/v1/settings' && method === 'GET') {
+      const settings = await getSettings();
+      return sendResponse(settings);
+    }
+
+    // Update settings
+    if (pathname === '/api/v1/settings' && method === 'PATCH') {
+      const { callIntervalSeconds, moveToEndSeconds, examDurationSeconds } = body;
+      
+      if (callIntervalSeconds !== undefined) {
+        await updateSetting('call_interval_seconds', callIntervalSeconds);
+      }
+      if (moveToEndSeconds !== undefined) {
+        await updateSetting('move_to_end_seconds', moveToEndSeconds);
+      }
+      if (examDurationSeconds !== undefined) {
+        await updateSetting('exam_duration_seconds', examDurationSeconds);
+      }
+      
+      const updatedSettings = await getSettings();
+      return sendResponse(updatedSettings);
+    }
+
+    // Calculate estimated wait time
+    if (pathname === '/api/v1/settings/calculate-wait' && method === 'GET') {
+      const aheadCount = parseInt(parsedUrl.searchParams.get('ahead')) || 0;
+      const settings = await getSettings();
+      const waitTimeSeconds = aheadCount * settings.callIntervalSeconds;
+      const waitTimeMinutes = Math.ceil(waitTimeSeconds / 60);
+      
+      return sendResponse({
+        aheadCount,
+        waitTimeSeconds,
+        waitTimeMinutes,
+        settings
+      });
+    }
 
     // 2. PIN Management
     if (pathname === '/api/v1/pin/generate' && method === 'POST') {
