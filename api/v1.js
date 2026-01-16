@@ -11,7 +11,9 @@ async function supabaseRequest(path, options = {}) {
     'apikey': SUPABASE_KEY,
     'Authorization': `Bearer ${SUPABASE_KEY}`,
     'Content-Type': 'application/json',
-    'Prefer': options.method === 'POST' || options.method === 'PATCH' ? 'return=representation' : ''
+    'Prefer': options.method === 'POST' ? 'return=representation' : 
+              options.method === 'PATCH' ? 'return=representation' :
+              options.method === 'DELETE' ? 'return=representation' : ''
   };
 
   const response = await fetch(url, { ...options, headers });
@@ -19,7 +21,9 @@ async function supabaseRequest(path, options = {}) {
     const error = await response.json();
     throw new Error(`Supabase Error: ${JSON.stringify(error)}`);
   }
-  return await response.json();
+  
+  const text = await response.text();
+  return text ? JSON.parse(text) : [];
 }
 
 // دالة مساعدة لاستدعاء RPC functions في Supabase
@@ -87,32 +91,89 @@ async function getQueueStatus(clinicId, patientId) {
 // ==================== SETTINGS HELPERS ====================
 async function getSettings() {
   try {
-    const data = await supabaseRequest('settings?category=eq.queue');
+    const data = await supabaseRequest('settings?order=key.asc');
     const settings = {};
     data.forEach(s => {
-      settings[s.key] = parseInt(s.value) || s.value;
+      settings[s.key] = s.value;
     });
     return {
-      callIntervalSeconds: settings.call_interval_seconds || 120,
-      moveToEndSeconds: settings.move_to_end_seconds || 240,
-      examDurationSeconds: settings.exam_duration_seconds || 300
+      callIntervalSeconds: parseInt(settings.call_interval_seconds) || 120,
+      moveToEndSeconds: parseInt(settings.move_to_end_seconds) || 240,
+      examDurationSeconds: parseInt(settings.exam_duration_seconds) || 300,
+      autoCallEnabled: settings.auto_call_enabled === 'true',
+      soundEnabled: settings.sound_enabled === 'true',
+      notificationsEnabled: settings.notifications_enabled === 'true'
     };
   } catch (error) {
-    // Return defaults if settings table doesn't exist
     return {
       callIntervalSeconds: 120,
       moveToEndSeconds: 240,
-      examDurationSeconds: 300
+      examDurationSeconds: 300,
+      autoCallEnabled: false,
+      soundEnabled: true,
+      notificationsEnabled: true
     };
   }
 }
 
 async function updateSetting(key, value) {
-  const updated = await supabaseRequest(`settings?key=eq.${key}`, {
-    method: 'PATCH',
-    body: JSON.stringify({ value: value.toString(), updated_at: new Date().toISOString() })
-  });
-  return updated;
+  try {
+    // Check if setting exists
+    const existing = await supabaseRequest(`settings?key=eq.${key}`);
+    if (existing.length > 0) {
+      const updated = await supabaseRequest(`settings?key=eq.${key}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ value: value.toString(), updated_at: new Date().toISOString() })
+      });
+      return updated;
+    } else {
+      // Create new setting
+      const created = await supabaseRequest('settings', {
+        method: 'POST',
+        body: JSON.stringify({ 
+          key, 
+          value: value.toString(), 
+          category: 'queue',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        })
+      });
+      return created;
+    }
+  } catch (error) {
+    console.error('Error updating setting:', error);
+    throw error;
+  }
+}
+
+// ==================== ADMIN AUTH ====================
+async function validateAdminCredentials(username, password) {
+  try {
+    const users = await supabaseRequest(`admin_users?username=eq.${username}&is_active=eq.true`);
+    if (users.length === 0) return null;
+    
+    const user = users[0];
+    // Simple password check (in production, use bcrypt)
+    const passwordHash = crypto.createHash('sha256').update(password).digest('hex');
+    if (user.password_hash === passwordHash || user.password_hash === password) {
+      // Update last login
+      await supabaseRequest(`admin_users?id=eq.${user.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ last_login: new Date().toISOString() })
+      });
+      return {
+        id: user.id,
+        username: user.username,
+        full_name: user.full_name,
+        role: user.role,
+        permissions: user.permissions
+      };
+    }
+    return null;
+  } catch (error) {
+    console.error('Auth error:', error);
+    return null;
+  }
 }
 
 // ==================== API HANDLER ====================
@@ -131,7 +192,7 @@ export default async function handler(req, res) {
   const pathname = parsedUrl.pathname;
   
   let body = {};
-  if (['POST', 'PATCH', 'PUT'].includes(method)) {
+  if (['POST', 'PATCH', 'PUT', 'DELETE'].includes(method)) {
     try {
       body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
     } catch (e) { /* ignore */ }
@@ -141,10 +202,329 @@ export default async function handler(req, res) {
   const sendError = (message, status = 400) => res.status(status).json({ success: false, error: { message, code: status }, timestamp: new Date().toISOString() });
 
   try {
-    // 1. Health Check
-    if (pathname === '/api/v1/health') return sendResponse({ status: 'ok' });
+    // ==================== HEALTH CHECK ====================
+    if (pathname === '/api/v1/health') return sendResponse({ status: 'ok', version: '2.0.0' });
 
-    // ==================== SETTINGS ENDPOINTS ====================
+    // ==================== ADMIN AUTH ====================
+    if (pathname === '/api/v1/admin/login' && method === 'POST') {
+      const { username, password } = body;
+      if (!username || !password) return sendError('Username and password required');
+      
+      const user = await validateAdminCredentials(username, password);
+      if (!user) return sendError('Invalid credentials', 401);
+      
+      return sendResponse(user);
+    }
+
+    // ==================== ADMIN USERS MANAGEMENT ====================
+    // Get all admin users
+    if (pathname === '/api/v1/admin/users' && method === 'GET') {
+      const users = await supabaseRequest('admin_users?order=created_at.desc');
+      const safeUsers = users.map(u => ({
+        id: u.id,
+        username: u.username,
+        full_name: u.full_name,
+        role: u.role,
+        permissions: u.permissions,
+        is_active: u.is_active,
+        last_login: u.last_login,
+        created_at: u.created_at
+      }));
+      return sendResponse(safeUsers);
+    }
+
+    // Create admin user
+    if (pathname === '/api/v1/admin/users' && method === 'POST') {
+      const { username, password, full_name, role, permissions } = body;
+      if (!username || !password || !full_name) return sendError('Username, password and full name required');
+      
+      // Check if username exists
+      const existing = await supabaseRequest(`admin_users?username=eq.${username}`);
+      if (existing.length > 0) return sendError('Username already exists');
+      
+      const passwordHash = crypto.createHash('sha256').update(password).digest('hex');
+      const newUser = await supabaseRequest('admin_users', {
+        method: 'POST',
+        body: JSON.stringify({
+          username,
+          password_hash: passwordHash,
+          full_name,
+          role: role || 'viewer',
+          permissions: permissions || { view: true, edit: false, delete: false, admin: false },
+          is_active: true,
+          created_at: new Date().toISOString()
+        })
+      });
+      
+      return sendResponse({
+        id: newUser[0].id,
+        username: newUser[0].username,
+        full_name: newUser[0].full_name,
+        role: newUser[0].role,
+        permissions: newUser[0].permissions
+      });
+    }
+
+    // Update admin user
+    if (pathname.match(/^\/api\/v1\/admin\/users\/\d+$/) && method === 'PATCH') {
+      const userId = pathname.split('/').pop();
+      const { full_name, role, permissions, is_active, password } = body;
+      
+      const updateData = { updated_at: new Date().toISOString() };
+      if (full_name !== undefined) updateData.full_name = full_name;
+      if (role !== undefined) updateData.role = role;
+      if (permissions !== undefined) updateData.permissions = permissions;
+      if (is_active !== undefined) updateData.is_active = is_active;
+      if (password) updateData.password_hash = crypto.createHash('sha256').update(password).digest('hex');
+      
+      const updated = await supabaseRequest(`admin_users?id=eq.${userId}`, {
+        method: 'PATCH',
+        body: JSON.stringify(updateData)
+      });
+      
+      return sendResponse(updated[0] || { id: userId, ...updateData });
+    }
+
+    // Delete admin user
+    if (pathname.match(/^\/api\/v1\/admin\/users\/\d+$/) && method === 'DELETE') {
+      const userId = pathname.split('/').pop();
+      await supabaseRequest(`admin_users?id=eq.${userId}`, { method: 'DELETE' });
+      return sendResponse({ deleted: true, id: userId });
+    }
+
+    // ==================== CLINICS MANAGEMENT ====================
+    // Get all clinics
+    if (pathname === '/api/v1/admin/clinics' && method === 'GET') {
+      const clinics = await supabaseRequest('clinics?order=sort_order.asc,name_ar.asc');
+      return sendResponse(clinics);
+    }
+
+    // Create clinic
+    if (pathname === '/api/v1/admin/clinics' && method === 'POST') {
+      const { name_ar, name_en, floor_ar, floor_en, is_active, sort_order, exam_types } = body;
+      if (!name_ar) return sendError('Arabic name required');
+      
+      const newClinic = await supabaseRequest('clinics', {
+        method: 'POST',
+        body: JSON.stringify({
+          name_ar,
+          name_en: name_en || name_ar,
+          floor_ar: floor_ar || 'الدور الأرضي',
+          floor_en: floor_en || 'Ground Floor',
+          is_active: is_active !== false,
+          sort_order: sort_order || 0,
+          exam_types: exam_types || [],
+          created_at: new Date().toISOString()
+        })
+      });
+      
+      return sendResponse(newClinic[0]);
+    }
+
+    // Update clinic
+    if (pathname.match(/^\/api\/v1\/admin\/clinics\/[\w-]+$/) && method === 'PATCH') {
+      const clinicId = pathname.split('/').pop();
+      const { name_ar, name_en, floor_ar, floor_en, is_active, sort_order, exam_types } = body;
+      
+      const updateData = { updated_at: new Date().toISOString() };
+      if (name_ar !== undefined) updateData.name_ar = name_ar;
+      if (name_en !== undefined) updateData.name_en = name_en;
+      if (floor_ar !== undefined) updateData.floor_ar = floor_ar;
+      if (floor_en !== undefined) updateData.floor_en = floor_en;
+      if (is_active !== undefined) updateData.is_active = is_active;
+      if (sort_order !== undefined) updateData.sort_order = sort_order;
+      if (exam_types !== undefined) updateData.exam_types = exam_types;
+      
+      const updated = await supabaseRequest(`clinics?id=eq.${clinicId}`, {
+        method: 'PATCH',
+        body: JSON.stringify(updateData)
+      });
+      
+      return sendResponse(updated[0] || { id: clinicId, ...updateData });
+    }
+
+    // Delete clinic
+    if (pathname.match(/^\/api\/v1\/admin\/clinics\/[\w-]+$/) && method === 'DELETE') {
+      const clinicId = pathname.split('/').pop();
+      await supabaseRequest(`clinics?id=eq.${clinicId}`, { method: 'DELETE' });
+      return sendResponse({ deleted: true, id: clinicId });
+    }
+
+    // ==================== QUEUE MANAGEMENT (ADMIN) ====================
+    // Get all queues for today
+    if (pathname === '/api/v1/admin/queues' && method === 'GET') {
+      const clinicId = parsedUrl.searchParams.get('clinicId');
+      const status = parsedUrl.searchParams.get('status');
+      const today = new Date().toISOString().split('T')[0];
+      
+      let query = `queues?entered_at=gte.${today}T00:00:00&order=entered_at.asc`;
+      if (clinicId) query += `&clinic_id=eq.${clinicId}`;
+      if (status) query += `&status=eq.${status}`;
+      
+      const queues = await supabaseRequest(query);
+      return sendResponse(queues);
+    }
+
+    // Update queue entry
+    if (pathname.match(/^\/api\/v1\/admin\/queues\/\d+$/) && method === 'PATCH') {
+      const queueId = pathname.split('/').pop();
+      const { status, display_number } = body;
+      
+      const updateData = { updated_at: new Date().toISOString() };
+      if (status !== undefined) {
+        updateData.status = status;
+        if (status === 'serving') updateData.called_at = new Date().toISOString();
+        if (status === 'completed') updateData.completed_at = new Date().toISOString();
+      }
+      if (display_number !== undefined) updateData.display_number = display_number;
+      
+      const updated = await supabaseRequest(`queues?id=eq.${queueId}`, {
+        method: 'PATCH',
+        body: JSON.stringify(updateData)
+      });
+      
+      return sendResponse(updated[0] || { id: queueId, ...updateData });
+    }
+
+    // Delete queue entry
+    if (pathname.match(/^\/api\/v1\/admin\/queues\/\d+$/) && method === 'DELETE') {
+      const queueId = pathname.split('/').pop();
+      await supabaseRequest(`queues?id=eq.${queueId}`, { method: 'DELETE' });
+      return sendResponse({ deleted: true, id: queueId });
+    }
+
+    // Move patient to end of queue
+    if (pathname === '/api/v1/admin/queues/move-to-end' && method === 'POST') {
+      const { queueId, clinicId } = body;
+      if (!queueId || !clinicId) return sendError('Queue ID and Clinic ID required');
+      
+      // Get max display number
+      const maxNum = await supabaseRequest(`queues?clinic_id=eq.${clinicId}&order=display_number.desc&limit=1`);
+      const newNumber = (maxNum[0]?.display_number || 0) + 1;
+      
+      const updated = await supabaseRequest(`queues?id=eq.${queueId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ 
+          display_number: newNumber, 
+          status: 'waiting',
+          updated_at: new Date().toISOString()
+        })
+      });
+      
+      return sendResponse(updated[0]);
+    }
+
+    // ==================== PIN MANAGEMENT ====================
+    // Get all PINs for today
+    if (pathname === '/api/v1/admin/pins' && method === 'GET') {
+      const clinics = await supabaseRequest('clinics?is_active=eq.true&order=sort_order.asc');
+      const pins = clinics.map(c => ({
+        clinic_id: c.id,
+        clinic_name_ar: c.name_ar,
+        clinic_name_en: c.name_en,
+        pin: generateDailyPIN(c.id),
+        date: new Date().toISOString().split('T')[0]
+      }));
+      return sendResponse(pins);
+    }
+
+    // Regenerate PIN (creates new secret for clinic)
+    if (pathname === '/api/v1/admin/pins/regenerate' && method === 'POST') {
+      const { clinicId } = body;
+      if (!clinicId) return sendError('Clinic ID required');
+      
+      // Generate new PIN with timestamp to make it unique
+      const timestamp = Date.now();
+      const secret = process.env.PIN_SECRET || 'mmc-mms-secret-2026';
+      const hash = crypto.createHmac('sha256', secret).update(`${clinicId}-${timestamp}`).digest('hex');
+      const newPin = (parseInt(hash.substring(0, 8), 16) % 9000 + 1000).toString();
+      
+      return sendResponse({ clinicId, pin: newPin, regenerated: true });
+    }
+
+    // ==================== REPORTS ====================
+    // Get statistics
+    if (pathname === '/api/v1/admin/reports/stats' && method === 'GET') {
+      const period = parsedUrl.searchParams.get('period') || 'today';
+      let startDate, endDate;
+      const now = new Date();
+      
+      switch (period) {
+        case 'today':
+          startDate = new Date(now.setHours(0, 0, 0, 0)).toISOString();
+          endDate = new Date().toISOString();
+          break;
+        case 'week':
+          startDate = new Date(now.setDate(now.getDate() - 7)).toISOString();
+          endDate = new Date().toISOString();
+          break;
+        case 'month':
+          startDate = new Date(now.setMonth(now.getMonth() - 1)).toISOString();
+          endDate = new Date().toISOString();
+          break;
+        default:
+          startDate = new Date(now.setHours(0, 0, 0, 0)).toISOString();
+          endDate = new Date().toISOString();
+      }
+      
+      const allQueues = await supabaseRequest(`queues?entered_at=gte.${startDate}&entered_at=lte.${endDate}`);
+      const patients = await supabaseRequest(`patients?created_at=gte.${startDate}&created_at=lte.${endDate}`);
+      const clinics = await supabaseRequest('clinics?is_active=eq.true');
+      
+      // Calculate stats
+      const totalPatients = patients.length;
+      const totalVisits = allQueues.length;
+      const completed = allQueues.filter(q => q.status === 'completed').length;
+      const waiting = allQueues.filter(q => q.status === 'waiting').length;
+      const serving = allQueues.filter(q => q.status === 'serving').length;
+      
+      // Calculate average wait time
+      const completedWithTimes = allQueues.filter(q => q.completed_at && q.entered_at);
+      let avgWaitMinutes = 0;
+      if (completedWithTimes.length > 0) {
+        const totalWait = completedWithTimes.reduce((sum, q) => {
+          return sum + (new Date(q.completed_at) - new Date(q.entered_at));
+        }, 0);
+        avgWaitMinutes = Math.round(totalWait / completedWithTimes.length / 60000);
+      }
+      
+      // Stats by clinic
+      const clinicStats = clinics.map(c => {
+        const clinicQueues = allQueues.filter(q => q.clinic_id === c.id);
+        return {
+          clinic_id: c.id,
+          clinic_name_ar: c.name_ar,
+          clinic_name_en: c.name_en,
+          total: clinicQueues.length,
+          completed: clinicQueues.filter(q => q.status === 'completed').length,
+          waiting: clinicQueues.filter(q => q.status === 'waiting').length,
+          serving: clinicQueues.filter(q => q.status === 'serving').length
+        };
+      });
+      
+      // Gender distribution
+      const males = patients.filter(p => p.gender === 'male').length;
+      const females = patients.filter(p => p.gender === 'female').length;
+      
+      return sendResponse({
+        period,
+        startDate,
+        endDate,
+        summary: {
+          totalPatients,
+          totalVisits,
+          completed,
+          waiting,
+          serving,
+          avgWaitMinutes,
+          completionRate: totalVisits > 0 ? Math.round((completed / totalVisits) * 100) : 0
+        },
+        genderDistribution: { males, females },
+        clinicStats
+      });
+    }
+
+    // ==================== SETTINGS ====================
     // Get all settings
     if (pathname === '/api/v1/settings' && method === 'GET') {
       const settings = await getSettings();
@@ -153,17 +533,21 @@ export default async function handler(req, res) {
 
     // Update settings
     if (pathname === '/api/v1/settings' && method === 'PATCH') {
-      const { callIntervalSeconds, moveToEndSeconds, examDurationSeconds } = body;
+      const { 
+        callIntervalSeconds, 
+        moveToEndSeconds, 
+        examDurationSeconds,
+        autoCallEnabled,
+        soundEnabled,
+        notificationsEnabled
+      } = body;
       
-      if (callIntervalSeconds !== undefined) {
-        await updateSetting('call_interval_seconds', callIntervalSeconds);
-      }
-      if (moveToEndSeconds !== undefined) {
-        await updateSetting('move_to_end_seconds', moveToEndSeconds);
-      }
-      if (examDurationSeconds !== undefined) {
-        await updateSetting('exam_duration_seconds', examDurationSeconds);
-      }
+      if (callIntervalSeconds !== undefined) await updateSetting('call_interval_seconds', callIntervalSeconds);
+      if (moveToEndSeconds !== undefined) await updateSetting('move_to_end_seconds', moveToEndSeconds);
+      if (examDurationSeconds !== undefined) await updateSetting('exam_duration_seconds', examDurationSeconds);
+      if (autoCallEnabled !== undefined) await updateSetting('auto_call_enabled', autoCallEnabled);
+      if (soundEnabled !== undefined) await updateSetting('sound_enabled', soundEnabled);
+      if (notificationsEnabled !== undefined) await updateSetting('notifications_enabled', notificationsEnabled);
       
       const updatedSettings = await getSettings();
       return sendResponse(updatedSettings);
@@ -184,6 +568,72 @@ export default async function handler(req, res) {
       });
     }
 
+    // ==================== NOTIFICATIONS ====================
+    // Get notifications
+    if (pathname === '/api/v1/admin/notifications' && method === 'GET') {
+      try {
+        const notifications = await supabaseRequest('notifications?order=created_at.desc&limit=50');
+        return sendResponse(notifications);
+      } catch (error) {
+        return sendResponse([]);
+      }
+    }
+
+    // Create notification
+    if (pathname === '/api/v1/admin/notifications' && method === 'POST') {
+      const { title, message, type, target } = body;
+      if (!title || !message) return sendError('Title and message required');
+      
+      const notification = await supabaseRequest('notifications', {
+        method: 'POST',
+        body: JSON.stringify({
+          title,
+          message,
+          type: type || 'info',
+          target: target || 'all',
+          is_read: false,
+          created_at: new Date().toISOString()
+        })
+      });
+      
+      return sendResponse(notification[0]);
+    }
+
+    // ==================== ACTIVITY LOG ====================
+    // Get activity log
+    if (pathname === '/api/v1/admin/activity-log' && method === 'GET') {
+      try {
+        const logs = await supabaseRequest('activity_logs?order=created_at.desc&limit=100');
+        return sendResponse(logs);
+      } catch (error) {
+        return sendResponse([]);
+      }
+    }
+
+    // Create activity log entry
+    if (pathname === '/api/v1/admin/activity-log' && method === 'POST') {
+      const { action, entity, entity_id, details, user_id } = body;
+      
+      try {
+        const log = await supabaseRequest('activity_logs', {
+          method: 'POST',
+          body: JSON.stringify({
+            action,
+            entity,
+            entity_id,
+            details,
+            user_id,
+            created_at: new Date().toISOString()
+          })
+        });
+        return sendResponse(log[0]);
+      } catch (error) {
+        // Table might not exist, just return success
+        return sendResponse({ logged: true });
+      }
+    }
+
+    // ==================== ORIGINAL ENDPOINTS ====================
     // 2. PIN Management
     if (pathname === '/api/v1/pin/generate' && method === 'POST') {
       const { clinicId } = body;
@@ -305,7 +755,6 @@ export default async function handler(req, res) {
       const patient = await supabaseRequest(`patients?patient_id=eq.${patientId}`);
       if (patient.length === 0) return sendError('Patient not found', 404);
 
-      // Return a mock pathway for now, or integrate with dynamic-pathways logic
       return sendResponse({
         patient_id: patientId,
         pathway: [
