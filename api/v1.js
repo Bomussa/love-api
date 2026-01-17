@@ -55,7 +55,8 @@ function generateDailyPIN(clinicId) {
   const today = new Date().toISOString().split('T')[0];
   const secret = process.env.PIN_SECRET || 'mmc-mms-secret-2026';
   const hash = crypto.createHmac('sha256', secret).update(`${clinicId}-${today}`).digest('hex');
-  return (parseInt(hash.substring(0, 8), 16) % 9000 + 1000).toString();
+  // PIN من رقمين فقط (10-99) ويتغير يومياً تلقائياً
+  return (parseInt(hash.substring(0, 8), 16) % 90 + 10).toString();
 }
 
 async function getNextDisplayNumber(clinicId) {
@@ -433,11 +434,11 @@ export default async function handler(req, res) {
       const { clinicId } = body;
       if (!clinicId) return sendError('Clinic ID required');
       
-      // Generate new PIN with timestamp to make it unique
+      // Generate new PIN with timestamp to make it unique - PIN من رقمين فقط (10-99)
       const timestamp = Date.now();
       const secret = process.env.PIN_SECRET || 'mmc-mms-secret-2026';
       const hash = crypto.createHmac('sha256', secret).update(`${clinicId}-${timestamp}`).digest('hex');
-      const newPin = (parseInt(hash.substring(0, 8), 16) % 9000 + 1000).toString();
+      const newPin = (parseInt(hash.substring(0, 8), 16) % 90 + 10).toString();
       
       return sendResponse({ clinicId, pin: newPin, regenerated: true });
     }
