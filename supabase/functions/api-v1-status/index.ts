@@ -21,19 +21,19 @@ serve(async (req) => {
         // Get total patients today
         const today = new Date().toISOString().split('T')[0];
         const { count: totalToday } = await supabase
-          .from('queue')
+          .from('unified_queue')
           .select('*', { count: 'exact', head: true })
           .gte('entered_at', `${today}T00:00:00`);
 
         // Get waiting count
         const { count: waiting } = await supabase
-          .from('queue')
+          .from('unified_queue')
           .select('*', { count: 'exact', head: true })
           .eq('status', 'waiting');
 
         // Get completed count today
         const { count: completed } = await supabase
-          .from('queue')
+          .from('unified_queue')
           .select('*', { count: 'exact', head: true })
           .eq('status', 'completed')
           .gte('completed_at', `${today}T00:00:00`);

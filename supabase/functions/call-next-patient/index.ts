@@ -61,7 +61,7 @@ serve(async (req) => {
 
     // 2. Find Next Patient
     const { data: nextPatient, error: queueError } = await supabaseClient
-      .from('queue')
+      .from('unified_queue')
       .select('*')
       .eq('clinic_id', clinic_id)
       .eq('status', 'waiting')
@@ -78,7 +78,7 @@ serve(async (req) => {
 
     // 3. Update Status to 'called'
     const { data: updatedQueue, error: updateError } = await supabaseClient
-      .from('queue')
+      .from('unified_queue')
       .update({
         status: 'called',
         called_at: new Date().toISOString()

@@ -52,7 +52,7 @@ serve(async (req: Request) => {
 
         // Get current queue position
         const { count } = await supabase
-            .from('queues')
+            .from('unified_queue')
             .select('*', { count: 'exact' })
             .eq('clinic', clinic)
             .eq('status', 'waiting');
@@ -61,7 +61,7 @@ serve(async (req: Request) => {
 
         // Add to queue
         const { data: queueEntry, error: queueError } = await supabase
-            .from('queues')
+            .from('unified_queue')
             .insert({
                 patient_id: session.patient_id,
                 clinic: clinic,

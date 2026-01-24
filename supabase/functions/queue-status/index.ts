@@ -27,7 +27,7 @@ serve(async (req) => {
 
         // 1. Get Waiting List
         const { data: waiting, error: waitingError } = await supabase
-            .from('queue')
+            .from('unified_queue')
             .select('*')
             .eq('clinic_id', clinicId)
             .eq('status', 'waiting')
@@ -37,7 +37,7 @@ serve(async (req) => {
 
         // 2. Get Currently Serving
         const { data: serving, error: servingError } = await supabase
-            .from('queue')
+            .from('unified_queue')
             .select('*')
             .eq('clinic_id', clinicId)
             .in('status', ['called', 'in_service']) // Check both

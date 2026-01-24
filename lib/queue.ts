@@ -41,7 +41,7 @@ export async function getNextTicket(clinicId: string): Promise<number> {
 export async function getQueueSnapshot(clinicId: string): Promise<QueueSnapshot> {
   try {
     const { data, error } = await supabase
-      .from('queue')
+      .from('unified_queue')
       .select('status')
       .eq('clinic_id', clinicId)
       .neq('status', 'DONE');
@@ -77,7 +77,7 @@ export async function createTicket(
 
     // Insert into queue
     const { data, error } = await supabase
-      .from('queue')
+      .from('unified_queue')
       .insert({
         clinic_id: clinicId,
         patient_id: patientId,
@@ -106,7 +106,7 @@ export async function getPatientQueuePosition(
 ): Promise<{ position: number; status: string } | null> {
   try {
     const { data, error } = await supabase
-      .from('queue')
+      .from('unified_queue')
       .select('position, status')
       .eq('clinic_id', clinicId)
       .eq('patient_id', patientId)
@@ -132,7 +132,7 @@ export async function updateQueueStatus(
 ): Promise<QueueItem> {
   try {
     const { data, error } = await supabase
-      .from('queue')
+      .from('unified_queue')
       .update({
         status,
         ...(status === 'YOUR_TURN' && { called_at: new Date().toISOString() }),
@@ -156,7 +156,7 @@ export async function updateQueueStatus(
 export async function getTopWaitingPatients(clinicId: string, limit: number = 10): Promise<QueueItem[]> {
   try {
     const { data, error } = await supabase
-      .from('queue')
+      .from('unified_queue')
       .select('*')
       .eq('clinic_id', clinicId)
       .eq('status', 'WAITING')
