@@ -4,3 +4,4 @@
 .env.local
 .envrc
 supabase/.env
+.env*.local
