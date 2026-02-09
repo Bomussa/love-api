@@ -61,7 +61,7 @@ function generateDailyPIN(clinicId) {
 
 async function getNextDisplayNumber(clinicId) {
   const today = new Date().toISOString().split('T')[0];
-  const data = await supabaseRequest(`queues?clinic_id=eq.${clinicId}&order=display_number.desc&limit=1`);
+  const data = await supabaseRequest(`unified_queue?clinic_id=eq.${clinicId}&order=display_number.desc&limit=1`);
   
   if (data.length === 0) return 1;
   const lastEntryDate = new Date(data[0].entered_at).toISOString().split('T')[0];
@@ -71,11 +71,11 @@ async function getNextDisplayNumber(clinicId) {
 }
 
 async function getQueueStatus(clinicId, patientId) {
-  const data = await supabaseRequest(`queues?clinic_id=eq.${clinicId}&patient_id=eq.${patientId}&order=entered_at.desc&limit=1`);
+  const data = await supabaseRequest(`unified_queue?clinic_id=eq.${clinicId}&patient_id=eq.${patientId}&order=entered_at.desc&limit=1`);
   if (data.length === 0) return null;
 
   const patient = data[0];
-  const waitingList = await supabaseRequest(`queues?clinic_id=eq.${clinicId}&status=eq.waiting&order=entered_at.asc`);
+  const waitingList = await supabaseRequest(`unified_queue?clinic_id=eq.${clinicId}&status=eq.waiting&order=entered_at.asc`);
   const position = waitingList.findIndex(q => q.id === patient.id) + 1;
 
   return {
@@ -150,7 +150,7 @@ async function updateSetting(key, value) {
 // ==================== ADMIN AUTH ====================
 async function validateAdminCredentials(username, password) {
   try {
-    const users = await supabaseRequest(`admin_users?username=eq.${username}&is_active=eq.true`);
+    const users = await supabaseRequest(`admins?username=eq.${username}&is_active=eq.true`);
     if (users.length === 0) return null;
     
     const user = users[0];
@@ -158,7 +158,7 @@ async function validateAdminCredentials(username, password) {
     const passwordHash = crypto.createHash('sha256').update(password).digest('hex');
     if (user.password_hash === passwordHash || user.password_hash === password) {
       // Update last login
-      await supabaseRequest(`admin_users?id=eq.${user.id}`, {
+      await supabaseRequest(`admins?id=eq.${user.id}`, {
         method: 'PATCH',
         body: JSON.stringify({ last_login: new Date().toISOString() })
       });
@@ -220,7 +220,7 @@ export default async function handler(req, res) {
     // ==================== ADMIN USERS MANAGEMENT ====================
     // Get all admin users
     if (pathname === '/api/v1/admin/users' && method === 'GET') {
-      const users = await supabaseRequest('admin_users?order=created_at.desc');
+      const users = await supabaseRequest('admins?order=created_at.desc');
       const safeUsers = users.map(u => ({
         id: u.id,
         username: u.username,
@@ -240,11 +240,11 @@ export default async function handler(req, res) {
       if (!username || !password || !full_name) return sendError('Username, password and full name required');
       
       // Check if username exists
-      const existing = await supabaseRequest(`admin_users?username=eq.${username}`);
+      const existing = await supabaseRequest(`admins?username=eq.${username}`);
       if (existing.length > 0) return sendError('Username already exists');
       
       const passwordHash = crypto.createHash('sha256').update(password).digest('hex');
-      const newUser = await supabaseRequest('admin_users', {
+      const newUser = await supabaseRequest('admins', {
         method: 'POST',
         body: JSON.stringify({
           username,
@@ -278,7 +278,7 @@ export default async function handler(req, res) {
       if (is_active !== undefined) updateData.is_active = is_active;
       if (password) updateData.password_hash = crypto.createHash('sha256').update(password).digest('hex');
       
-      const updated = await supabaseRequest(`admin_users?id=eq.${userId}`, {
+      const updated = await supabaseRequest(`admins?id=eq.${userId}`, {
         method: 'PATCH',
         body: JSON.stringify(updateData)
       });
@@ -289,7 +289,7 @@ export default async function handler(req, res) {
     // Delete admin user
     if (pathname.match(/^\/api\/v1\/admin\/users\/\d+$/) && method === 'DELETE') {
       const userId = pathname.split('/').pop();
-      await supabaseRequest(`admin_users?id=eq.${userId}`, { method: 'DELETE' });
+      await supabaseRequest(`admins?id=eq.${userId}`, { method: 'DELETE' });
       return sendResponse({ deleted: true, id: userId });
     }
 
@@ -358,7 +358,7 @@ export default async function handler(req, res) {
       const status = parsedUrl.searchParams.get('status');
       const today = new Date().toISOString().split('T')[0];
       
-      let query = `queues?entered_at=gte.${today}T00:00:00&order=entered_at.asc`;
+      let query = `unified_queue?entered_at=gte.${today}T00:00:00&order=entered_at.asc`;
       if (clinicId) query += `&clinic_id=eq.${clinicId}`;
       if (status) query += `&status=eq.${status}`;
       
@@ -379,7 +379,7 @@ export default async function handler(req, res) {
       }
       if (display_number !== undefined) updateData.display_number = display_number;
       
-      const updated = await supabaseRequest(`queues?id=eq.${queueId}`, {
+      const updated = await supabaseRequest(`unified_queue?id=eq.${queueId}`, {
         method: 'PATCH',
         body: JSON.stringify(updateData)
       });
@@ -390,7 +390,7 @@ export default async function handler(req, res) {
     // Delete queue entry
     if (pathname.match(/^\/api\/v1\/admin\/queues\/\d+$/) && method === 'DELETE') {
       const queueId = pathname.split('/').pop();
-      await supabaseRequest(`queues?id=eq.${queueId}`, { method: 'DELETE' });
+      await supabaseRequest(`unified_queue?id=eq.${queueId}`, { method: 'DELETE' });
       return sendResponse({ deleted: true, id: queueId });
     }
 
@@ -400,10 +400,10 @@ export default async function handler(req, res) {
       if (!queueId || !clinicId) return sendError('Queue ID and Clinic ID required');
       
       // Get max display number
-      const maxNum = await supabaseRequest(`queues?clinic_id=eq.${clinicId}&order=display_number.desc&limit=1`);
+      const maxNum = await supabaseRequest(`unified_queue?clinic_id=eq.${clinicId}&order=display_number.desc&limit=1`);
       const newNumber = (maxNum[0]?.display_number || 0) + 1;
       
-      const updated = await supabaseRequest(`queues?id=eq.${queueId}`, {
+      const updated = await supabaseRequest(`unified_queue?id=eq.${queueId}`, {
         method: 'PATCH',
         body: JSON.stringify({ 
           display_number: newNumber, 
@@ -468,7 +468,7 @@ export default async function handler(req, res) {
           endDate = new Date().toISOString();
       }
       
-      const allQueues = await supabaseRequest(`queues?entered_at=gte.${startDate}&entered_at=lte.${endDate}`);
+      const allQueues = await supabaseRequest(`unified_queue?entered_at=gte.${startDate}&entered_at=lte.${endDate}`);
       const patients = await supabaseRequest(`patients?created_at=gte.${startDate}&created_at=lte.${endDate}`);
       const clinics = await supabaseRequest('clinics?is_active=eq.true');
       
@@ -694,7 +694,7 @@ export default async function handler(req, res) {
       if (!clinicId || !patientId) return sendError('Clinic ID and Patient ID required');
       
       const displayNumber = await getNextDisplayNumber(clinicId);
-      const entry = await supabaseRequest('queues', {
+      const entry = await supabaseRequest('unified_queue', {
         method: 'POST',
         body: JSON.stringify({
           clinic_id: clinicId,
@@ -722,16 +722,16 @@ export default async function handler(req, res) {
       if (pin !== generateDailyPIN(clinicId)) return sendError('Invalid PIN', 401);
 
       // Complete current
-      await supabaseRequest(`queues?clinic_id=eq.${clinicId}&status=eq.serving`, {
+      await supabaseRequest(`unified_queue?clinic_id=eq.${clinicId}&status=eq.serving`, {
         method: 'PATCH',
         body: JSON.stringify({ status: 'completed', completed_at: new Date().toISOString() })
       }).catch(() => {});
 
       // Call next
-      const next = await supabaseRequest(`queues?clinic_id=eq.${clinicId}&status=eq.waiting&order=entered_at.asc&limit=1`);
+      const next = await supabaseRequest(`unified_queue?clinic_id=eq.${clinicId}&status=eq.waiting&order=entered_at.asc&limit=1`);
       if (next.length === 0) return sendResponse({ message: 'Queue empty' });
 
-      const updated = await supabaseRequest(`queues?id=eq.${next[0].id}`, {
+      const updated = await supabaseRequest(`unified_queue?id=eq.${next[0].id}`, {
         method: 'PATCH',
         body: JSON.stringify({ status: 'serving', called_at: new Date().toISOString() })
       });
@@ -743,7 +743,7 @@ export default async function handler(req, res) {
       if (!clinicId || !patientId || !pin) return sendError('Clinic ID, Patient ID and PIN required');
       if (pin !== generateDailyPIN(clinicId)) return sendError('Invalid PIN', 401);
 
-      const updated = await supabaseRequest(`queues?clinic_id=eq.${clinicId}&patient_id=eq.${patientId}&status=eq.serving`, {
+      const updated = await supabaseRequest(`unified_queue?clinic_id=eq.${clinicId}&patient_id=eq.${patientId}&status=eq.serving`, {
         method: 'PATCH',
         body: JSON.stringify({ status: 'completed', completed_at: new Date().toISOString() })
       });
