@@ -741,11 +741,25 @@ export default async function handler(req, res) {
     if (pathname === '/api/v1/queue/done' && method === 'POST') {
       const { clinicId, patientId, pin } = body;
       if (!clinicId || !patientId || !pin) return sendError('Clinic ID, Patient ID and PIN required');
-      if (pin !== generateDailyPIN(clinicId)) return sendError('Invalid PIN', 401);
+      
+      // التحقق من الـ PIN: إما المولد برمجياً أو الموجود في جدول pins
+      const generatedPin = generateDailyPIN(clinicId);
+      let isValid = (pin === generatedPin);
+      
+      if (!isValid) {
+        const pinCheck = await supabaseRequest(`pins?clinic_code=eq.${clinicId}&pin=eq.${pin}&is_active=eq.true`);
+        if (pinCheck && pinCheck.length > 0) isValid = true;
+      }
 
-      const updated = await supabaseRequest(`unified_queue?clinic_id=eq.${clinicId}&patient_id=eq.${patientId}&status=eq.serving`, {
+      if (!isValid) return sendError('Invalid PIN', 401);
+
+      const updated = await supabaseRequest(`unified_queue?clinic_id=eq.${clinicId}&patient_id=eq.${patientId}&status=in.(serving,called,waiting)`, {
         method: 'PATCH',
-        body: JSON.stringify({ status: 'completed', completed_at: new Date().toISOString() })
+        body: JSON.stringify({ 
+          status: 'completed', 
+          completed_at: new Date().toISOString(),
+          completed_by_pin: pin 
+        })
       });
       return sendResponse(updated[0] || updated);
     }
