@@ -4,15 +4,37 @@
     {
       "source": "/api/(.*)",
       "headers": [
-        { "key": "Access-Control-Allow-Origin", "value": "*" },
-        { "key": "Access-Control-Allow-Methods", "value": "GET, POST, PUT, DELETE, OPTIONS" },
-        { "key": "Access-Control-Allow-Headers", "value": "Content-Type, Authorization" }
+        {
+          "key": "Access-Control-Allow-Origin",
+          "value": "*"
+        },
+        {
+          "key": "Access-Control-Allow-Methods",
+          "value": "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+        },
+        {
+          "key": "Access-Control-Allow-Headers",
+          "value": "Content-Type, Authorization"
+        }
       ]
     }
   ],
   "rewrites": [
-    { "source": "/api/v1/(.*)", "destination": "/api/v1.js" },
-    { "source": "/api/v1", "destination": "/api/v1.js" },
-    { "source": "/api/(.*)", "destination": "/api/v1.js" }
+    {
+      "source": "/api/health",
+      "destination": "/api/health.js"
+    },
+    {
+      "source": "/api/maintenance",
+      "destination": "/api/maintenance.js"
+    },
+    {
+      "source": "/api/v1/(.*)",
+      "destination": "/api/v1.js"
+    },
+    {
+      "source": "/api/v1",
+      "destination": "/api/v1.js"
+    }
   ]
 }

@@ -204,7 +204,8 @@ export default async function handler(req, res) {
 
   try {
     // ==================== HEALTH CHECK ====================
-    if (pathname === '/api/v1/health') return sendResponse({ status: 'ok', version: '2.0.0' });
+    // Note: /api/v1/health is handled by /api/health.js to avoid duplication
+    if (pathname === '/api/v1/health') return sendResponse({ status: 'ok', version: '2.0.0', note: 'use /api/health for full status' });
 
     // ==================== ADMIN AUTH ====================
     if (pathname === '/api/v1/admin/login' && method === 'POST') {
