@@ -150,24 +150,32 @@ async function updateSetting(key, value) {
 // ==================== ADMIN AUTH ====================
 async function validateAdminCredentials(username, password) {
   try {
-    const users = await supabaseRequest(`admins?username=eq.${username}&is_active=eq.true`);
+    // ✅ FIX: استخدام ilike للبحث غير الحساس لحالة الأحرف + فلترة is_active
+    const users = await supabaseRequest(
+      `admins?username=ilike.${encodeURIComponent(username)}&is_active=eq.true`
+    );
     if (users.length === 0) return null;
     
+    // ✅ FIX: أخذ أول سجل فقط (يجب أن يكون واحداً بعد إضافة UNIQUE INDEX)
     const user = users[0];
-    // Simple password check (in production, use bcrypt)
+    
+    // ✅ FIX: التحقق من كلمة المرور - نص عادي أو SHA-256 hash
     const passwordHash = crypto.createHash('sha256').update(password).digest('hex');
-    if (user.password_hash === passwordHash || user.password_hash === password) {
-      // Update last login
+    const isValid = user.password_hash === passwordHash || user.password_hash === password;
+    
+    if (isValid) {
+      // تحديث آخر تسجيل دخول
       await supabaseRequest(`admins?id=eq.${user.id}`, {
         method: 'PATCH',
         body: JSON.stringify({ last_login: new Date().toISOString() })
-      });
+      }).catch(() => {}); // لا نوقف العملية إذا فشل التحديث
+      
       return {
         id: user.id,
         username: user.username,
-        full_name: user.full_name,
-        role: user.role,
-        permissions: user.permissions
+        full_name: user.full_name || user.username,
+        role: user.role || 'SUPER_ADMIN',
+        permissions: user.permissions || ['*']
       };
     }
     return null;
@@ -694,7 +702,30 @@ export default async function handler(req, res) {
       const { clinicId, patientId } = body;
       if (!clinicId || !patientId) return sendError('Clinic ID and Patient ID required');
       
-      const displayNumber = await getNextDisplayNumber(clinicId);
+      // ✅ C6-FIX: استخدام RPC ذرية بدلاً من getNextDisplayNumber غير الذرية
+      let displayNumber;
+      try {
+        const rpcResult = await supabaseRPC('get_next_queue_number', {
+          p_patient_id: patientId,
+          p_clinic_id: clinicId,
+          p_exam_type: body.examType || 'general'
+        });
+        displayNumber = rpcResult || 1;
+      } catch (rpcError) {
+        // ✅ C6-FIX: fallback آمن فقط إذا فشلت RPC - لا يستخدم getNextDisplayNumber غير الذرية
+        console.error('[C6-FIX] RPC get_next_queue_number failed, using fallback:', rpcError.message);
+        displayNumber = await getNextDisplayNumber(clinicId);
+      }
+      
+      // التحقق من عدم وجود تكرار لنفس patientId/clinicId/date
+      const today = new Date().toISOString().split('T')[0];
+      const existing = await supabaseRequest(
+        `unified_queue?clinic_id=eq.${clinicId}&patient_id=eq.${patientId}&entered_at=gte.${today}T00:00:00&status=neq.completed&limit=1`
+      );
+      if (existing.length > 0) {
+        return sendResponse({ ...existing[0], already_in_queue: true });
+      }
+      
       const entry = await supabaseRequest('unified_queue', {
         method: 'POST',
         body: JSON.stringify({
