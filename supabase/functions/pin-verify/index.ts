@@ -1,5 +1,5 @@
-// Supabase Edge Function: queue-status
-// Get current queue status for a clinic
+// Supabase Edge Function: pin-verify
+// Verify PIN and mark as used
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
@@ -7,7 +7,7 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
 const corsHeaders = {
-  'access-control-allow-origin': '*',
+  'access-control-allow-origin': 'https://mmc-mms.com',
   'access-control-allow-methods': 'GET,POST,OPTIONS',
   'access-control-allow-headers': 'authorization, x-client-info, apikey, content-type',
 };
@@ -19,42 +19,54 @@ serve(async (req: Request) => {
 
   try {
     const db = createClient(SUPABASE_URL, SERVICE_KEY);
-    const { searchParams } = new URL(req.url);
-    const clinic_id = searchParams.get('clinic_id') || searchParams.get('clinicId');
+    const { clinic_id, pin } = await req.json();
 
-    if (!clinic_id) {
+    if (!clinic_id || !pin) {
       return new Response(
-        JSON.stringify({ success: false, error: 'clinic_id parameter required' }),
+        JSON.stringify({ success: false, error: 'clinic_id and pin required' }),
         { status: 400, headers: { 'content-type': 'application/json', ...corsHeaders } },
       );
     }
 
-    // Get queue list
-    const { data: queueList, error: e1 } = await db
-      .from('queue')
-      .select('id,position,status,entered_at,called_at,patient_id')
+    const now = new Date().toISOString();
+
+    // Find valid PIN
+    const { data: pinRecord, error: e1 } = await db
+      .from('pins')
+      .select('*')
       .eq('clinic_id', clinic_id)
-      .in('status', ['waiting', 'called'])
-      .order('position', { ascending: true });
+      .eq('pin', pin)
+      .is('used_at', null)
+      .gt('valid_until', now)
+      .order('id', { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
     if (e1) throw e1;
 
-    // Get current serving
-    const serving = queueList?.filter((q) => q.status === 'called')[0];
-    const waiting = queueList?.filter((q) => q.status === 'waiting');
+    const valid = !!pinRecord;
+    let remaining_seconds = 0;
+
+    if (valid && pinRecord) {
+      // Mark as used
+      await db
+        .from('pins')
+        .update({ used_at: now })
+        .eq('id', pinRecord.id);
+
+      remaining_seconds = Math.max(
+        0,
+        Math.floor((new Date(pinRecord.valid_until).getTime() - Date.now()) / 1000),
+      );
+    }
 
     return new Response(
       JSON.stringify({
         success: true,
         data: {
-          clinic_id,
-          queueLength: waiting?.length || 0,
-          totalInQueue: queueList?.length || 0,
-          currentServing: serving?.position || null,
-          next3: waiting?.slice(0, 3).map((q) => ({
-            position: q.position,
-            waiting_since: q.entered_at,
-          })) || [],
+          valid,
+          remaining_seconds,
+          message: valid ? 'PIN verified successfully' : 'Invalid or expired PIN',
         },
       }),
       { headers: { 'content-type': 'application/json', ...corsHeaders } },

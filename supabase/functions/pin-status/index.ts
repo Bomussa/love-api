@@ -1,62 +1,98 @@
-// @ts-nocheck
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+// Supabase Edge Function: pin-status
+// Get active daily PIN for a clinic (Updated 2025-11-18)
+import { serve } from 'https://deno.land/std@0.224.0/http/server.ts';
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+
+const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
+const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
 const corsHeaders = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-}
+  'access-control-allow-origin': '*',
+  'access-control-allow-methods': 'GET,POST,OPTIONS',
+  'access-control-allow-headers': 'authorization, x-client-info, apikey, content-type',
+};
 
-serve(async (req) => {
-    if (req.method === 'OPTIONS') {
-        return new Response('ok', { headers: corsHeaders })
+const getTodayDateString = () => {
+  const now = new Date();
+  return now.toISOString().split('T')[0]; // YYYY-MM-DD
+};
+
+serve(async (req: Request) => {
+  if (req.method === 'OPTIONS') {
+    return new Response(null, { headers: corsHeaders });
+  }
+
+  try {
+    const db = createClient(SUPABASE_URL, SERVICE_KEY);
+    const { searchParams } = new URL(req.url);
+    const clinic_id = searchParams.get('clinic_id') || searchParams.get('clinicId');
+
+    if (!clinic_id) {
+      return new Response(
+        JSON.stringify({ success: false, error: 'clinic_id parameter required' }),
+        { status: 400, headers: { 'content-type': 'application/json', ...corsHeaders } },
+      );
     }
 
-    try {
-        const supabase = createClient(
-            Deno.env.get('SUPABASE_URL') ?? '',
-            Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-        )
+    const now = new Date().toISOString();
+    const today = getTodayDateString();
 
-        const { data: clinics, error } = await supabase
-            .from('clinics')
-            .select('id, name_ar, name_en, pin_code, pin_expires_at, is_active')
-            .eq('is_active', true)
+    // Get today's active PIN
+    const { data: pins, error } = await db
+      .from('pins')
+      .select('*')
+      .eq('clinic_id', clinic_id)
+      .gt('valid_until', now)
+      .order('created_at', { ascending: false })
+      .limit(10);
 
-        if (error) throw error
+    if (error) throw error;
 
-        const pinStatus = {}
-        const now = new Date()
+    // Filter for today's PIN
+    const todayPins = (pins || []).filter((pin) => {
+      const pinDate = new Date(pin.created_at).toISOString().split('T')[0];
+      return pinDate === today;
+    });
 
-        clinics.forEach(clinic => {
-             // Logic to determine if PIN is valid
-             const expires = clinic.pin_expires_at ? new Date(clinic.pin_expires_at) : null
-             const isActive = clinic.pin_code && expires && expires > now
+    const activePin = todayPins[0] || null;
 
-             // ALWAYS return the PIN for the Admin Panel. 
-             // Security is handled by the fact that only Admins should access this endpoint 
-             // (protected by RLS or Application Logic, but here we must unblock the UI).
-             if (isActive) {
-                 pinStatus[clinic.id] = {
-                     clinicName: clinic.name_ar || clinic.id,
-                     pin: clinic.pin_code,  // EXPLICITLY RETURN THE PIN
-                     expiresAt: clinic.pin_expires_at
-                 }
-             }
-        })
+    if (activePin) {
+      const expiresIn = Math.floor((new Date(activePin.valid_until).getTime() - Date.now()) / 1000);
 
-        return new Response(
-            JSON.stringify({
-                success: true,
-                pins: pinStatus
-            }),
-            { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        )
-
-    } catch (error) {
-        return new Response(
-            JSON.stringify({ success: false, error: error.message }),
-            { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        )
+      return new Response(
+        JSON.stringify({
+          success: true,
+          data: {
+            clinic_id,
+            has_active_pin: true,
+            pin: activePin.pin,
+            pin_id: activePin.id,
+            valid_until: activePin.valid_until,
+            expires_in_seconds: expiresIn,
+            is_used: activePin.used_at !== null,
+            checked_at: now,
+          },
+        }),
+        { headers: { 'content-type': 'application/json', ...corsHeaders } },
+      );
     }
-})
+
+    return new Response(
+      JSON.stringify({
+        success: true,
+        data: {
+          clinic_id,
+          has_active_pin: false,
+          pin: null,
+          checked_at: now,
+        },
+      }),
+      { headers: { 'content-type': 'application/json', ...corsHeaders } },
+    );
+  } catch (err) {
+    return new Response(
+      JSON.stringify({ success: false, error: String(err) }),
+      { status: 400, headers: { 'content-type': 'application/json', ...corsHeaders } },
+    );
+  }
+});
