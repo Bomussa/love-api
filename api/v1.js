@@ -751,7 +751,14 @@ export default async function handler(req, res) {
     if (pathname === '/api/v1/queue/next' && method === 'POST') {
       const { clinicId, pin } = body;
       if (!clinicId || !pin) return sendError('Clinic ID and PIN required');
-      if (pin !== generateDailyPIN(clinicId)) return sendError('Invalid PIN', 401);
+      // ✅ FIX: التحقق من PIN عبر generateDailyPIN أو جدول pins (متطابق مع queue/done)
+      const generatedPinNext = generateDailyPIN(clinicId);
+      let isPinValidNext = (pin === generatedPinNext);
+      if (!isPinValidNext) {
+        const pinCheckNext = await supabaseRequest(`pins?clinic_code=eq.${clinicId}&pin=eq.${pin}&is_active=eq.true`);
+        if (pinCheckNext && pinCheckNext.length > 0) isPinValidNext = true;
+      }
+      if (!isPinValidNext) return sendError('Invalid PIN', 401);
 
       // Complete current
       await supabaseRequest(`unified_queue?clinic_id=eq.${clinicId}&status=eq.serving`, {
@@ -796,18 +803,38 @@ export default async function handler(req, res) {
       return sendResponse(updated[0] || updated);
     }
 
-    // 5. Pathway
+    // 5. Pathway - يعيد المسار الحقيقي من قاعدة البيانات
     if (pathname.startsWith('/api/v1/pathway/') && method === 'GET') {
       const patientId = pathname.split('/').pop();
+      const examType = parsedUrl.searchParams.get('examType') || 'general';
       const patient = await supabaseRequest(`patients?patient_id=eq.${patientId}`);
       if (patient.length === 0) return sendError('Patient not found', 404);
 
+      // جلب العيادات المرتبطة بنوع الفحص من قاعدة البيانات
+      let clinics = [];
+      try {
+        clinics = await supabaseRequest(`clinics?is_active=eq.true&order=sort_order.asc`);
+        // فلترة حسب exam_types إذا كان محدداً
+        if (examType !== 'general') {
+          clinics = clinics.filter(c => !c.exam_types || c.exam_types.length === 0 || c.exam_types.includes(examType));
+        }
+      } catch (e) {
+        clinics = [];
+      }
+
+      const pathway = clinics.map(c => ({
+        id: c.id,
+        name_ar: c.name_ar,
+        name_en: c.name_en,
+        floor_ar: c.floor_ar,
+        floor_en: c.floor_en,
+        sort_order: c.sort_order
+      }));
+
       return sendResponse({
         patient_id: patientId,
-        pathway: [
-          { id: 'xray', name: 'الأشعة' },
-          { id: 'lab', name: 'المختبر' }
-        ]
+        exam_type: examType,
+        pathway
       });
     }
 
