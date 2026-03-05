@@ -309,12 +309,15 @@ export default async function handler(req, res) {
     // Original Endpoints
     if (pathname === '/api/v1/admin/login' && method === 'POST') {
       const { username, password } = body;
-      const users = await supabaseRequest(`admins?username=ilike.${encodeURIComponent(username)}&is_active=eq.true`);
+      // ✅ Fixed: Use admin_users table (same as frontend) instead of admins
+      const users = await supabaseRequest(`admin_users?username=ilike.${encodeURIComponent(username)}&is_active=eq.true`);
       if (users.length === 0) return sendError('Invalid credentials', 401);
       const user = users[0];
-      const passwordHash = crypto.createHash('sha256').update(password).digest('hex');
-      if (user.password_hash === passwordHash || user.password_hash === password) {
-        return sendResponse({ id: user.id, username: user.username, role: user.role || 'SUPER_ADMIN' });
+      // ✅ Fixed: Use same hash method as frontend (SHA-256 + salt)
+      const passwordHashSalted = crypto.createHash('sha256').update(password + 'mmc-salt-2026').digest('hex');
+      const passwordHashPlain = crypto.createHash('sha256').update(password).digest('hex');
+      if (user.password_hash === passwordHashSalted || user.password_hash === passwordHashPlain || user.password_hash === password) {
+        return sendResponse({ id: user.id, username: user.username, role: user.role || 'ADMIN', permissions: user.permissions || [] });
       }
       return sendError('Invalid credentials', 401);
     }
