@@ -23,6 +23,13 @@
       ]
     }
   ],
+  "redirects": [
+    {
+      "source": "/api/v1",
+      "destination": "/api/v1/health",
+      "permanent": false
+    }
+  ],
   "rewrites": [
     {
       "source": "/api/health",
@@ -34,10 +41,6 @@
     },
     {
       "source": "/api/v1/(.*)",
-      "destination": "/api/v1.js"
-    },
-    {
-      "source": "/api/v1",
       "destination": "/api/v1.js"
     }
   ]

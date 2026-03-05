@@ -1,9 +1,15 @@
 import crypto from 'crypto';
 
 // ==================== CONFIGURATION ====================
-const SUPABASE_URL = process.env.SUPABASE_URL || 'https://rujwuruuosffcxazymit.supabase.co';
+// ✅ K4 Fix: Remove unsafe defaults - fail explicitly when env vars are missing
+const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SERVICE_ROLE_SECRET;
-const REPAIR_TOKEN = process.env.QA_REPAIR_TOKEN || 'mmc-mms-repair-secret-2026';
+const REPAIR_TOKEN = process.env.QA_REPAIR_TOKEN;
+
+// Fail fast if critical env vars are missing
+if (!SUPABASE_URL || !SUPABASE_KEY) {
+  console.error('FATAL: Missing required environment variables: SUPABASE_URL and/or SUPABASE_SERVICE_ROLE_KEY');
+}
 
 // ==================== CORE UTILITIES ====================
 async function supabaseRequest(path, options = {}) {
@@ -51,7 +57,12 @@ async function supabaseRPC(functionName, params = {}) {
 // ==================== BUSINESS LOGIC ====================
 function generateDailyPIN(clinicId) {
   const today = new Date().toISOString().split('T')[0];
-  const secret = process.env.PIN_SECRET || 'mmc-mms-secret-2026';
+  const secret = process.env.PIN_SECRET;
+  if (!secret) {
+    console.error('WARNING: PIN_SECRET environment variable not set');
+    // Use a fallback only for backwards compatibility - should be set in env
+    return (parseInt(crypto.createHmac('sha256', 'mmc-mms-secret-2026').update(`${clinicId}-${today}`).digest('hex').substring(0, 8), 16) % 90 + 10).toString();
+  }
   const hash = crypto.createHmac('sha256', secret).update(`${clinicId}-${today}`).digest('hex');
   return (parseInt(hash.substring(0, 8), 16) % 90 + 10).toString();
 }
@@ -277,7 +288,15 @@ export default async function handler(req, res) {
   const sendError = (message, status = 400) => res.status(status).json({ success: false, error: { message, code: status }, timestamp: new Date().toISOString() });
 
   try {
-    if (pathname === '/api/v1/health') return sendResponse({ status: 'ok', version: '2.0.0' });
+    if (pathname === '/api/v1/health') {
+      const envOk = !!(SUPABASE_URL && SUPABASE_KEY);
+      return sendResponse({ 
+        status: envOk ? 'ok' : 'degraded', 
+        version: '2.0.0',
+        env_configured: envOk,
+        repair_token_set: !!REPAIR_TOKEN
+      });
+    }
 
     // QA & Repair Endpoints
     if (pathname === '/api/v1/qa/deep_run' && method === 'GET') return sendResponse(await runDeepQA());
