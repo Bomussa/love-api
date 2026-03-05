@@ -1,0 +1,50 @@
+name: MMC Autonomous QA Monitor
+
+on:
+  schedule:
+    - cron: '*/5 * * * *' # Every 5 minutes
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  autonomous-qa:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 1. Deep QA Run (Before)
+        id: qa_before
+        run: |
+          RESPONSE=$(curl -s "${{ secrets.MONITOR_BASE_URL_PROD }}/api/v1/qa/deep_run")
+          echo "qa_response=$RESPONSE" >> $GITHUB_OUTPUT
+          echo "QA Before Response: $RESPONSE"
+          
+      - name: 2. Process Findings & Repair
+        if: contains(steps.qa_before.outputs.qa_response, '"ok":false')
+        run: |
+          FINDINGS=$(echo '${{ steps.qa_before.outputs.qa_response }}' | jq -c '.data.findings[]')
+          for finding in $FINDINGS; do
+            FINDING_ID=$(echo $finding | jq -r '.id')
+            TYPE=$(echo $finding | jq -r '.type')
+            echo "Attempting repair for finding $FINDING_ID ($TYPE)"
+            
+            # Call Repair API
+            curl -X POST "${{ secrets.MONITOR_BASE_URL_PROD }}/api/v1/repair/execute" \
+              -H "Content-Type: application/json" \
+              -d "{\"findingId\": \"$FINDING_ID\", \"token\": \"${{ secrets.QA_REPAIR_TOKEN }}\"}"
+          done
+
+      - name: 3. Deep QA Run (After)
+        if: contains(steps.qa_before.outputs.qa_response, '"ok":false')
+        run: |
+          RESPONSE=$(curl -s "${{ secrets.MONITOR_BASE_URL_PROD }}/api/v1/qa/deep_run")
+          echo "QA After Response: $RESPONSE"
+          
+      - name: 4. Final Proof Pack Report
+        run: |
+          mkdir -p artifacts
+          echo '${{ steps.qa_before.outputs.qa_response }}' > artifacts/qa_run_before.json
+          # Add more summary generation here if needed
+          
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: proof-pack-${{ github.run_id }}
+          path: artifacts/

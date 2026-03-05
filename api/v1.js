@@ -643,6 +643,30 @@ export default async function handler(req, res) {
       }
     }
 
+    // ==================== DEEP QA & SELF-HEALING ====================
+    if (pathname === '/api/v1/qa/deep_run' && method === 'GET') {
+      try {
+        const { runDeepQA } = await import('./qa-repair.js');
+        const result = await runDeepQA();
+        return sendResponse(result);
+      } catch (error) {
+        return sendError(error.message, 500);
+      }
+    }
+
+    if (pathname === '/api/v1/repair/execute' && method === 'POST') {
+      try {
+        const { findingId, token } = body;
+        if (!findingId || !token) return sendError('Finding ID and Token required');
+        
+        const { executeRepair } = await import('./qa-repair.js');
+        const result = await executeRepair(findingId, token);
+        return sendResponse(result);
+      } catch (error) {
+        return sendError(error.message, 500);
+      }
+    }
+
     // ==================== ORIGINAL ENDPOINTS ====================
     // 2. PIN Management
     if (pathname === '/api/v1/pin/generate' && method === 'POST') {
