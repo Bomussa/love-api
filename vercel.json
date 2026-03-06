@@ -4,44 +4,17 @@
     {
       "source": "/api/(.*)",
       "headers": [
-        {
-          "key": "Access-Control-Allow-Origin",
-          "value": "*"
-        },
-        {
-          "key": "Access-Control-Allow-Methods",
-          "value": "GET, POST, PUT, PATCH, DELETE, OPTIONS"
-        },
-        {
-          "key": "Access-Control-Allow-Headers",
-          "value": "Content-Type, Authorization"
-        },
-        {
-          "key": "Cache-Control",
-          "value": "s-maxage=1, stale-while-revalidate=59"
-        }
+        { "key": "Access-Control-Allow-Origin", "value": "*" },
+        { "key": "Access-Control-Allow-Methods", "value": "GET, POST, PUT, PATCH, DELETE, OPTIONS" },
+        { "key": "Access-Control-Allow-Headers", "value": "Content-Type, Authorization" },
+        { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
       ]
     }
   ],
-  "redirects": [
-    {
-      "source": "/api/v1",
-      "destination": "/api/v1/health",
-      "permanent": false
-    }
-  ],
   "rewrites": [
-    {
-      "source": "/api/health",
-      "destination": "/api/health.js"
-    },
-    {
-      "source": "/api/maintenance",
-      "destination": "/api/maintenance.js"
-    },
-    {
-      "source": "/api/v1/(.*)",
-      "destination": "/api/v1.js"
-    }
+    { "source": "/api/health", "destination": "/api/v1.js" },
+    { "source": "/api/v1/health", "destination": "/api/v1.js" },
+    { "source": "/api/v1/qa/deep_run", "destination": "/api/v1.js" },
+    { "source": "/api/v1/(.*)", "destination": "/api/v1.js" }
   ]
 }
