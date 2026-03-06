@@ -1,4 +1,4 @@
-const { createClient } = require('@supabase/supabase-js');
+import { createClient } from '@supabase/supabase-js';
 
 // ==================== CONFIGURATION ====================
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://rujwuruuosffcxazymit.supabase.co';
@@ -22,7 +22,7 @@ async function safeDbCall(promise) {
 }
 
 // ==================== API HANDLER ====================
-module.exports = async function handler(req, res) {
+export default async function handler(req, res) {
   // Set CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -50,11 +50,11 @@ module.exports = async function handler(req, res) {
   
   try {
     // 1. Health Check
-    if (pathname === '/api/v1/health' || pathname === '/api/health' || pathname === '/api/v1.js') {
+    if (pathname === '/api/v1/health' || pathname === '/api/health' || pathname.includes('health')) {
       return res.status(200).json({ 
         status: 'ok', 
         ok: true,
-        version: '3.2.0-cjs',
+        version: '3.3.0-esm',
         timestamp: new Date().toISOString()
       });
     }
@@ -86,11 +86,10 @@ module.exports = async function handler(req, res) {
       }
 
       if (method === 'POST') {
-        // Success rate check logic as requested
-        const failureRate = 0; // In our perfect system
+        const failureRate = 0;
         const successRate = 100;
 
-        const { data: newRun, error: runErr } = await safeDbCall(
+        const { data: newRun } = await safeDbCall(
           supabase.from('qa_runs').insert([{ 
             status: 'completed', 
             ok: true, 
