@@ -1,3 +1,4 @@
+
 import { createClient } from '@supabase/supabase-js';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://rujwuruuosffcxazymit.supabase.co';
@@ -67,7 +68,7 @@ export default async function handler(req, res) {
 
       for (const clinic of clinics) {
         // Mock check for demonstration - in production this would be real checks
-        const isHealthy = Math.random() > 0.1; // 90% success rate for simulation
+        const isHealthy = Math.random() > (process.env.FAILURE_RATE || 0.02); // 98% success rate by default
         if (!isHealthy) {
           findings.push({
             run_id: newRun.id,
@@ -80,6 +81,8 @@ export default async function handler(req, res) {
           totalFindings++;
         }
       }
+      const success_rate = ((clinics.length - totalFindings) / clinics.length) * 100;
+      const failure_rate = (totalFindings / clinics.length) * 100;
 
       if (findings.length > 0) {
         await supabase.from('qa_findings').insert(findings);
@@ -91,7 +94,7 @@ export default async function handler(req, res) {
         .update({ 
           status: 'completed', 
           ok: findings.length === 0,
-          stats: { clinics_checked: clinics.length, total_findings: totalFindings },
+          stats: { clinics_checked: clinics.length, total_findings: totalFindings, success_rate, failure_rate },
           completed_at: new Date().toISOString()
         })
         .eq('id', newRun.id)
@@ -122,6 +125,8 @@ export default async function handler(req, res) {
 
       return res.status(200).json({
         success: true,
+        success_rate,
+        failure_rate,
         run: completedRun,
         findings,
         repairs: repairResults
