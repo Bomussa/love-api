@@ -54,7 +54,7 @@ export default async function handler(req, res) {
       return res.status(200).json({ 
         status: 'ok', 
         ok: true,
-        version: '3.6.0-fully-dynamic',
+        version: '3.7.0-bug-fixed',
         timestamp: new Date().toISOString()
       });
     }
@@ -75,11 +75,16 @@ export default async function handler(req, res) {
         const { data: findings } = await supabase.from('smart_errors_log').select('*').order('occurred_at', { ascending: false }).limit(10);
         const { data: repairs } = await supabase.from('smart_fixes_log').select('*').order('applied_at', { ascending: false }).limit(10);
 
-        // د. عد الجداول تلقائياً عبر استعلام RPC (إذا كان متاحاً) أو استنتاج من OpenAPI
-        // ملاحظة: بما أن Supabase REST لا يعطي عدد الجداول مباشرة، سنستخدم RPC إذا تم تعريفه، أو سنقوم بعد الجداول في Schema العامة
-        // هنا سنقوم بعمل استعلام ذكي لعد الجداول من pg_catalog عبر RPC مخصص أو تقدير دقيق من واقع الفحص
-        const { data: tablesInfo } = await supabase.rpc('get_tables_count').catch(() => ({ data: 105 }));
-        const dynamicTablesCount = tablesInfo || 105; 
+        // د. عد الجداول تلقائياً (تصحيح الخطأ السابق)
+        let dynamicTablesCount = 105;
+        try {
+          const { data: tablesData, error: tablesError } = await supabase.rpc('get_tables_count');
+          if (!tablesError && tablesData) {
+            dynamicTablesCount = tablesData;
+          }
+        } catch (e) {
+          console.warn('RPC get_tables_count not available, using fallback 105');
+        }
 
         // Calculate real success rate
         const successRate = totalErrors > 0 ? Math.round((totalFixes / totalErrors) * 100) : 100;
@@ -113,7 +118,6 @@ export default async function handler(req, res) {
       }
 
       if (method === 'POST') {
-        // تفعيل الفحص التلقائي الفعلي
         return res.status(200).json({
           success: true,
           ok: true,
