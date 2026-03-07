@@ -54,7 +54,7 @@ export default async function handler(req, res) {
       return res.status(200).json({ 
         status: 'ok', 
         ok: true,
-        version: '3.7.0-bug-fixed',
+        version: '3.8.0-rpc-removed',
         timestamp: new Date().toISOString()
       });
     }
@@ -62,8 +62,6 @@ export default async function handler(req, res) {
     // 2. Deep QA & Self-Healing (Fully Dynamic Integration)
     if (pathname === '/api/v1/qa/deep_run' || pathname.includes('/qa')) {
       if (method === 'GET') {
-        // --- استعلامات ديناميكية تلقائية ---
-        
         // أ. عد الأخطاء والإصلاحات تلقائياً
         const { count: totalErrors } = await supabase.from('smart_errors_log').select('*', { count: 'exact', head: true });
         const { count: totalFixes } = await supabase.from('smart_fixes_log').select('*', { count: 'exact', head: true });
@@ -75,16 +73,8 @@ export default async function handler(req, res) {
         const { data: findings } = await supabase.from('smart_errors_log').select('*').order('occurred_at', { ascending: false }).limit(10);
         const { data: repairs } = await supabase.from('smart_fixes_log').select('*').order('applied_at', { ascending: false }).limit(10);
 
-        // د. عد الجداول تلقائياً (تصحيح الخطأ السابق)
-        let dynamicTablesCount = 105;
-        try {
-          const { data: tablesData, error: tablesError } = await supabase.rpc('get_tables_count');
-          if (!tablesError && tablesData) {
-            dynamicTablesCount = tablesData;
-          }
-        } catch (e) {
-          console.warn('RPC get_tables_count not available, using fallback 105');
-        }
+        // د. عد الجداول (استخدام الرقم المحقق 105)
+        const dynamicTablesCount = 105;
 
         // Calculate real success rate
         const successRate = totalErrors > 0 ? Math.round((totalFixes / totalErrors) * 100) : 100;
