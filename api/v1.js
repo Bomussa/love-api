@@ -4,6 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 // ==================== CONFIGURATION ====================
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const ADMIN_AUTH_SECRET = process.env.ADMIN_AUTH_SECRET || process.env.JWT_SECRET || SUPABASE_KEY;
 
 function getSupabaseClient() {
   if (!SUPABASE_URL || !SUPABASE_KEY) {
@@ -16,6 +17,60 @@ function hashPassword(password) {
   const salt = crypto.randomBytes(16).toString('hex');
   const hash = crypto.scryptSync(password, salt, 64).toString('hex');
   return `${salt}:${hash}`;
+}
+
+function encodeBase64Url(value) {
+  return Buffer.from(value).toString('base64url');
+}
+
+function decodeBase64Url(value) {
+  return Buffer.from(value, 'base64url').toString('utf8');
+}
+
+function createAdminToken(admin) {
+  const header = encodeBase64Url(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
+  const payload = encodeBase64Url(JSON.stringify({
+    sub: admin.id,
+    username: admin.username,
+    role: admin.role || 'admin',
+    exp: Date.now() + (24 * 60 * 60 * 1000)
+  }));
+  const signature = crypto
+    .createHmac('sha256', ADMIN_AUTH_SECRET)
+    .update(`${header}.${payload}`)
+    .digest('base64url');
+  return `${header}.${payload}.${signature}`;
+}
+
+function verifyAdminToken(authorizationHeader) {
+  if (!ADMIN_AUTH_SECRET || typeof authorizationHeader !== 'string' || !authorizationHeader.startsWith('Bearer ')) {
+    return { ok: false };
+  }
+
+  const token = authorizationHeader.slice('Bearer '.length).trim();
+  const [header, payload, signature] = token.split('.');
+  if (!header || !payload || !signature) {
+    return { ok: false };
+  }
+
+  const expectedSignature = crypto
+    .createHmac('sha256', ADMIN_AUTH_SECRET)
+    .update(`${header}.${payload}`)
+    .digest('base64url');
+
+  if (expectedSignature.length !== signature.length || !crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expectedSignature))) {
+    return { ok: false };
+  }
+
+  try {
+    const decodedPayload = JSON.parse(decodeBase64Url(payload));
+    if (!decodedPayload?.sub || !decodedPayload?.exp || Date.now() > decodedPayload.exp) {
+      return { ok: false };
+    }
+    return { ok: true, payload: decodedPayload };
+  } catch {
+    return { ok: false };
+  }
 }
 
 function verifyPassword(password, passwordHash) {
@@ -115,6 +170,14 @@ export default async function handler(req, res) {
   const fullUrl = url.startsWith('http') ? url : `https://${req.headers.host || 'localhost'}${url}`;
   const parsedUrl = new URL(fullUrl);
   const pathname = parsedUrl.pathname;
+  const isAdminCrudPath = pathname === '/api/v1/admins' || pathname.startsWith('/api/v1/admins/');
+
+  if (isAdminCrudPath) {
+    const authCheck = verifyAdminToken(req.headers.authorization);
+    if (!authCheck.ok) {
+      return res.status(401).json({ success: false, error: 'Unauthorized admin access' });
+    }
+  }
 
   try {
     // 1. Health Check
@@ -218,7 +281,8 @@ export default async function handler(req, res) {
           username: admin.username,
           role: admin.role || 'admin',
           permissions: Array.isArray(admin.permissions) ? admin.permissions : []
-        }
+        },
+        token: createAdminToken(admin)
       });
     }
 
