@@ -2,15 +2,23 @@ import crypto from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 
 // ==================== CONFIGURATION ====================
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
-const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const SUPABASE_URL = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY || process.env.SUPABASE_ANON_KEY;
 const ADMIN_AUTH_SECRET = process.env.ADMIN_AUTH_SECRET || process.env.JWT_SECRET || SUPABASE_KEY;
 
 function getSupabaseClient() {
   if (!SUPABASE_URL || !SUPABASE_KEY) {
     return null;
   }
-  return createClient(SUPABASE_URL, SUPABASE_KEY);
+  return createClient(SUPABASE_URL, SUPABASE_KEY, {
+    auth: {
+      autoRefreshToken: true,
+      persistSession: false,
+    },
+    db: {
+      schema: 'public',
+    },
+  });
 }
 
 function hashPassword(password) {
@@ -218,13 +226,13 @@ export default async function handler(req, res) {
             completed_at: new Date().toISOString()
           },
           findings: (findings || []).map((f) => ({
-            description: f.message,
+            description: f.message || f.description,
             severity: f.severity,
             created_at: f.occurred_at
           })),
           repairs: (repairs || []).map((r) => ({
             status: r.success ? 'success' : 'failed',
-            strategy: r.strategy_name
+            strategy: r.strategy_name || r.strategy
           })),
           timestamp: new Date().toISOString()
         });
@@ -412,7 +420,7 @@ export default async function handler(req, res) {
     if (pathname === '/api/v1/stats-dashboard') {
       const { data: clinics } = await safeDbCall(supabase.from('clinics').select('name_ar, id'));
       const { count: patientsCount } = await supabase.from('patients').select('*', { count: 'exact', head: true });
-      const { count: queueCount } = await supabase.from('queue').select('*', { count: 'exact', head: true });
+      const { count: queueCount } = await supabase.from('queues').select('*', { count: 'exact', head: true });
 
       return res.status(200).json({
         success: true,
