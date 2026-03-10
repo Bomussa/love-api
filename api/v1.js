@@ -231,10 +231,66 @@ export default async function handler(req, res) {
       }
 
       if (method === 'POST') {
+        console.log('Starting self-healing run...');
+        
+        // 1. Check for missing PINs
+        const { data: clinics } = await supabase.from('clinics').select('id, name_ar');
+        const now = new Date().toISOString();
+        const today = new Date().toISOString().split('T')[0];
+        
+        let fixes = 0;
+        for (const clinic of (clinics || [])) {
+          const { data: pin } = await supabase
+            .from('pins')
+            .select('*')
+            .eq('clinic_code', clinic.id)
+            .eq('is_active', true)
+            .gte('expires_at', now)
+            .maybeSingle();
+            
+          if (!pin) {
+            console.log(`Generating missing PIN for clinic: ${clinic.name_ar}`);
+            const newPin = Math.floor(1000 + Math.random() * 9000).toString();
+            const expiresAt = new Date();
+            expiresAt.setHours(23, 59, 59, 999);
+            
+            await supabase.from('pins').insert({
+              clinic_code: clinic.id,
+              pin: newPin,
+              expires_at: expiresAt.toISOString(),
+              is_active: true,
+              max_uses: 999
+            });
+            
+            await supabase.from('smart_fixes_log').insert({
+              strategy_name: 'generate_missing_pin',
+              target_id: clinic.id,
+              success: true,
+              details: `Generated PIN ${newPin} for ${clinic.name_ar}`
+            });
+            fixes++;
+          }
+        }
+
+        // 2. Clean up expired sessions
+        const { data: expiredSessions } = await supabase
+          .from('patients')
+          .select('id')
+          .eq('status', 'active')
+          .lt('updated_at', new Date(Date.now() - 24 * 3600000).toISOString());
+          
+        if (expiredSessions && expiredSessions.length > 0) {
+          for (const session of expiredSessions) {
+            await supabase.from('patients').update({ status: 'expired' }).eq('id', session.id);
+            fixes++;
+          }
+        }
+
         return res.status(200).json({
           success: true,
           ok: true,
-          message: 'Self-healing run completed successfully.'
+          message: `Self-healing run completed. Applied ${fixes} fixes.`,
+          fixes_applied: fixes
         });
       }
     }
