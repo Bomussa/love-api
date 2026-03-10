@@ -76,6 +76,16 @@ serve(async (req) => {
          if (path === 'pin/status' && req.method === 'GET') {
              return await forwardToFunction('pin-status', req)
         }
+        
+        // 9. Admin Login
+        if (path === 'admin/login' && req.method === 'POST') {
+             return await forwardToFunction('admin-login', req)
+        }
+        
+        // 10. Admin Session Verify
+        if (path === 'admin/session/verify' && req.method === 'POST') {
+             return await forwardToFunction('admin-session-verify', req)
+        }
 
         // Fallback: Return 404
         return new Response(
