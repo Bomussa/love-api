@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
+import delegatedV1Handler from '../lib/api-handlers.js';
 
 // ==================== CONFIGURATION ====================
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -437,6 +438,10 @@ export default async function handler(req, res) {
           timestamp: new Date().toISOString()
         }
       });
+    }
+
+    if (pathname.startsWith('/api/v1/')) {
+      return delegatedV1Handler(req, res);
     }
 
     return res.status(404).json({ success: false, error: `Endpoint not found: ${pathname}` });
