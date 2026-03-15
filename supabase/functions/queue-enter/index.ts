@@ -72,44 +72,35 @@ serve(async (req: Request) => {
       );
     }
 
-    // استخدام الدالة الآمنة مع القفل التنافسي
-    const { data: result, error: rpcError } = await db
-      .rpc('enter_queue_safe', {
+    // استخدام الدالة الأساسية المتوافقة مع العقد الحالي
+    const tryRpc = async (fnName: string) => {
+      return await db.rpc(fnName, {
         p_clinic_id: clinic_id,
         p_patient_id: patient_id,
         p_patient_name: patient_name,
         p_exam_type: exam_type,
       });
+    };
 
-    if (rpcError) {
-      // إذا لم تكن الدالة موجودة، استخدم enter_queue_v2
-      const { data: fallbackResult, error: fallbackError } = await db
-        .rpc('enter_queue_v2', {
-          p_clinic_id: clinic_id,
-          p_patient_id: patient_id,
-          p_patient_name: patient_name,
-          p_exam_type: exam_type,
-        });
+    // ترتيب محاولات RPC من الأحدث إلى الأقدم لضمان التوافق
+    const rpcCandidates = ['enter_unified_queue_safe', 'enter_queue_safe', 'enter_queue_v2'];
+    let result: any = null;
+    let rpcError: any = null;
 
-      if (fallbackError) throw fallbackError;
-
-      return new Response(
-        JSON.stringify({
-          success: true,
-          data: {
-            clinic_id: fallbackResult.clinic,
-            patient_id: fallbackResult.user,
-            position: fallbackResult.number,
-            status: fallbackResult.status,
-            message: fallbackResult.message || 'Entered queue successfully',
-          },
-        }),
-        { headers: { 'Content-Type': 'application/json', ...corsHeaders } },
-      );
+    for (const fnName of rpcCandidates) {
+      const rpcResponse = await tryRpc(fnName);
+      if (!rpcResponse.error) {
+        result = rpcResponse.data;
+        rpcError = null;
+        break;
+      }
+      rpcError = rpcResponse.error;
     }
 
+    if (rpcError) throw rpcError;
+
     // التحقق من نتيجة الدالة الآمنة
-    if (result.status === 'ABORTED') {
+    if (result?.status === 'ABORTED') {
       return new Response(
         JSON.stringify({
           success: false,
