@@ -9,5 +9,8 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.98.0"
+  },
+  "scripts": {
+    "test": "node --test tests/*.test.js"
   }
 }
