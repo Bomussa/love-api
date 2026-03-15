@@ -1,10 +1,12 @@
 import crypto from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
+import delegatedV1Handler from '../lib/api-handlers.js';
+import { createAdminToken, verifyAdminBearerToken, hasValidAdminSecret } from '../lib/admin-auth.js';
 
 // ==================== CONFIGURATION ====================
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY || process.env.SUPABASE_ANON_KEY;
-const ADMIN_AUTH_SECRET = process.env.ADMIN_AUTH_SECRET || process.env.JWT_SECRET || SUPABASE_KEY;
+const ADMIN_AUTH_SECRET = process.env.ADMIN_AUTH_SECRET;
 
 function getSupabaseClient() {
   if (!SUPABASE_URL || !SUPABASE_KEY) {
@@ -27,58 +29,14 @@ function hashPassword(password) {
   return `${salt}:${hash}`;
 }
 
-function encodeBase64Url(value) {
-  return Buffer.from(value).toString('base64url');
-}
-
-function decodeBase64Url(value) {
-  return Buffer.from(value, 'base64url').toString('utf8');
-}
-
-function createAdminToken(admin) {
-  const header = encodeBase64Url(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
-  const payload = encodeBase64Url(JSON.stringify({
-    sub: admin.id,
-    username: admin.username,
-    role: admin.role || 'admin',
-    exp: Date.now() + (24 * 60 * 60 * 1000)
-  }));
-  const signature = crypto
-    .createHmac('sha256', ADMIN_AUTH_SECRET)
-    .update(`${header}.${payload}`)
-    .digest('base64url');
-  return `${header}.${payload}.${signature}`;
-}
-
 function verifyAdminToken(authorizationHeader) {
-  if (!ADMIN_AUTH_SECRET || typeof authorizationHeader !== 'string' || !authorizationHeader.startsWith('Bearer ')) {
-    return { ok: false };
-  }
+  return {
+    ok: verifyAdminBearerToken(authorizationHeader, ADMIN_AUTH_SECRET),
+  };
+}
 
-  const token = authorizationHeader.slice('Bearer '.length).trim();
-  const [header, payload, signature] = token.split('.');
-  if (!header || !payload || !signature) {
-    return { ok: false };
-  }
-
-  const expectedSignature = crypto
-    .createHmac('sha256', ADMIN_AUTH_SECRET)
-    .update(`${header}.${payload}`)
-    .digest('base64url');
-
-  if (expectedSignature.length !== signature.length || !crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expectedSignature))) {
-    return { ok: false };
-  }
-
-  try {
-    const decodedPayload = JSON.parse(decodeBase64Url(payload));
-    if (!decodedPayload?.sub || !decodedPayload?.exp || Date.now() > decodedPayload.exp) {
-      return { ok: false };
-    }
-    return { ok: true, payload: decodedPayload };
-  } catch {
-    return { ok: false };
-  }
+function getAuthorizationHeader(headers = {}) {
+  return headers.authorization || headers.Authorization || '';
 }
 
 function verifyPassword(password, passwordHash) {
@@ -87,7 +45,15 @@ function verifyPassword(password, passwordHash) {
   }
 
   const [salt, storedHash] = passwordHash.split(':');
+  if (!salt || !storedHash || storedHash.length !== 128 || !/^[a-f0-9]+$/i.test(storedHash)) {
+    return false;
+  }
+
   const derived = crypto.scryptSync(password, salt, 64).toString('hex');
+  if (derived.length !== storedHash.length) {
+    return false;
+  }
+
   return crypto.timingSafeEqual(Buffer.from(storedHash, 'hex'), Buffer.from(derived, 'hex'));
 }
 
@@ -179,9 +145,14 @@ export default async function handler(req, res) {
   const parsedUrl = new URL(fullUrl);
   const pathname = parsedUrl.pathname;
   const isAdminCrudPath = pathname === '/api/v1/admins' || pathname.startsWith('/api/v1/admins/');
+  const isQaMutationPath = pathname === '/api/v1/qa/deep_run' && method === 'POST';
 
-  if (isAdminCrudPath) {
-    const authCheck = verifyAdminToken(req.headers.authorization);
+  if (isAdminCrudPath || isQaMutationPath) {
+    if (!hasValidAdminSecret(ADMIN_AUTH_SECRET)) {
+      return res.status(503).json({ success: false, error: 'Server is missing secure ADMIN_AUTH_SECRET configuration.' });
+    }
+
+    const authCheck = verifyAdminToken(getAuthorizationHeader(req.headers));
     if (!authCheck.ok) {
       return res.status(401).json({ success: false, error: 'Unauthorized admin access' });
     }
@@ -311,6 +282,10 @@ export default async function handler(req, res) {
         return res.status(400).json({ success: false, error: validation.errors.join(', ') });
       }
 
+      if (!hasValidAdminSecret(ADMIN_AUTH_SECRET)) {
+        return res.status(503).json({ success: false, error: 'Server is missing secure ADMIN_AUTH_SECRET configuration.' });
+      }
+
       const { data: admin, error } = await supabase
         .from('admins')
         .select('id, username, role, permissions, is_active, password_hash, password')
@@ -334,7 +309,7 @@ export default async function handler(req, res) {
       if (validLegacy && !validHash) {
         await supabase
           .from('admins')
-          .update({ password_hash: hashPassword(password), updated_at: new Date().toISOString() })
+          .update({ password_hash: hashPassword(password), password: null, updated_at: new Date().toISOString() })
           .eq('id', admin.id);
       }
 
@@ -346,7 +321,7 @@ export default async function handler(req, res) {
           role: admin.role || 'admin',
           permissions: Array.isArray(admin.permissions) ? admin.permissions : []
         },
-        token: createAdminToken(admin)
+        token: createAdminToken(admin, ADMIN_AUTH_SECRET)
       });
     }
 
@@ -436,6 +411,10 @@ export default async function handler(req, res) {
           timestamp: new Date().toISOString()
         }
       });
+    }
+
+    if (pathname.startsWith('/api/v1/')) {
+      return delegatedV1Handler(req, res);
     }
 
     return res.status(404).json({ success: false, error: `Endpoint not found: ${pathname}` });
