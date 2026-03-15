@@ -1,10 +1,11 @@
 import crypto from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
+import delegatedV1Handler from '../lib/api-handlers.js';
 
 // ==================== CONFIGURATION ====================
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY || process.env.SUPABASE_ANON_KEY;
-const ADMIN_AUTH_SECRET = process.env.ADMIN_AUTH_SECRET || process.env.JWT_SECRET || SUPABASE_KEY;
+const ADMIN_AUTH_SECRET = process.env.ADMIN_AUTH_SECRET || process.env.JWT_SECRET;
 
 function getSupabaseClient() {
   if (!SUPABASE_URL || !SUPABASE_KEY) {
@@ -41,7 +42,7 @@ function createAdminToken(admin) {
     sub: admin.id,
     username: admin.username,
     role: admin.role || 'admin',
-    exp: Date.now() + (24 * 60 * 60 * 1000)
+    exp: Math.floor(Date.now() / 1000) + (24 * 60 * 60)
   }));
   const signature = crypto
     .createHmac('sha256', ADMIN_AUTH_SECRET)
@@ -72,7 +73,15 @@ function verifyAdminToken(authorizationHeader) {
 
   try {
     const decodedPayload = JSON.parse(decodeBase64Url(payload));
-    if (!decodedPayload?.sub || !decodedPayload?.exp || Date.now() > decodedPayload.exp) {
+    if (!decodedPayload?.sub || !decodedPayload?.exp) {
+      return { ok: false };
+    }
+
+    const expMillis = decodedPayload.exp < 1_000_000_000_000
+      ? decodedPayload.exp * 1000
+      : decodedPayload.exp;
+
+    if (Date.now() > expMillis) {
       return { ok: false };
     }
     return { ok: true, payload: decodedPayload };
@@ -179,8 +188,9 @@ export default async function handler(req, res) {
   const parsedUrl = new URL(fullUrl);
   const pathname = parsedUrl.pathname;
   const isAdminCrudPath = pathname === '/api/v1/admins' || pathname.startsWith('/api/v1/admins/');
+  const isQaMutationPath = pathname === '/api/v1/qa/deep_run' && method === 'POST';
 
-  if (isAdminCrudPath) {
+  if (isAdminCrudPath || isQaMutationPath) {
     const authCheck = verifyAdminToken(req.headers.authorization);
     if (!authCheck.ok) {
       return res.status(401).json({ success: false, error: 'Unauthorized admin access' });
@@ -436,6 +446,10 @@ export default async function handler(req, res) {
           timestamp: new Date().toISOString()
         }
       });
+    }
+
+    if (pathname.startsWith('/api/v1/')) {
+      return delegatedV1Handler(req, res);
     }
 
     return res.status(404).json({ success: false, error: `Endpoint not found: ${pathname}` });
