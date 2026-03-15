@@ -29,32 +29,54 @@ serve(async (req: Request) => {
       );
     }
 
-    // Get queue list
-    const { data: queueList, error: e1 } = await db
-      .from('queue')
-      .select('id,position,status,entered_at,called_at,patient_id')
+    // Primary source: public.queues (current canonical table)
+    const { data: canonicalQueue, error: canonicalError } = await db
+      .from('queues')
+      .select('id, queue_number_int, display_number, status, entered_at, called_at, patient_id')
       .eq('clinic_id', clinic_id)
       .in('status', ['waiting', 'called'])
-      .order('position', { ascending: true });
+      .order('queue_number_int', { ascending: true, nullsFirst: false });
 
-    if (e1) throw e1;
+    if (canonicalError) throw canonicalError;
 
-    // Get current serving
-    const serving = queueList?.filter((q) => q.status === 'called')[0];
-    const waiting = queueList?.filter((q) => q.status === 'waiting');
+    // Fallback source: public.unified_queue (legacy data path)
+    let queueList = canonicalQueue ?? [];
+    if (queueList.length === 0) {
+      const { data: legacyQueue, error: legacyError } = await db
+        .from('unified_queue')
+        .select('id, queue_position, display_number, status, entered_at, called_at, patient_id')
+        .eq('clinic_id', clinic_id)
+        .in('status', ['waiting', 'called'])
+        .order('queue_position', { ascending: true, nullsFirst: false });
+
+      if (legacyError) throw legacyError;
+      queueList = legacyQueue ?? [];
+    }
+
+    const normalized = queueList.map((row: any) => ({
+      id: row.id,
+      status: row.status,
+      entered_at: row.entered_at,
+      called_at: row.called_at,
+      patient_id: row.patient_id,
+      position: row.queue_number_int ?? row.queue_position ?? row.display_number ?? null,
+    }));
+
+    const serving = normalized.find((q) => q.status === 'called');
+    const waiting = normalized.filter((q) => q.status === 'waiting');
 
     return new Response(
       JSON.stringify({
         success: true,
         data: {
           clinic_id,
-          queueLength: waiting?.length || 0,
-          totalInQueue: queueList?.length || 0,
-          currentServing: serving?.position || null,
-          next3: waiting?.slice(0, 3).map((q) => ({
+          queueLength: waiting.length,
+          totalInQueue: normalized.length,
+          currentServing: serving?.position ?? null,
+          next3: waiting.slice(0, 3).map((q) => ({
             position: q.position,
             waiting_since: q.entered_at,
-          })) || [],
+          })),
         },
       }),
       { headers: { 'content-type': 'application/json', ...corsHeaders } },
