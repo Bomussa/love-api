@@ -1,4 +1,3 @@
-
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
@@ -24,50 +23,49 @@ serve(async (req) => {
       throw new Error('Missing clinic_id or pin')
     }
 
-    // 1. Verify PIN
-    // Check 'pins' table for daily PIN first (Preferred)
-    const today = new Date().toISOString().split('T')[0]
-    const { data: pinRecord, error: pinError } = await supabaseClient
+    // 1. Verify PIN (pins table first, then clinics table fallback)
+    const { data: pinRecord } = await supabaseClient
       .from('pins')
       .select('*')
-      .eq('clinic_code', clinic_id) // Assuming clinic_code matches clinic_id or need to look up
+      .eq('clinic_code', clinic_id)
       .eq('pin', pin)
       .eq('is_active', true)
       .gte('expires_at', new Date().toISOString())
       .limit(1)
       .maybeSingle()
-    
-    // Fallback to checking 'clinics' table if not found in 'pins' (Legacy/Denormalized support)
+
     let isPinValid = !!pinRecord
-    
+
     if (!isPinValid) {
-         const { data: clinic, error: clinicError } = await supabaseClient
+      const { data: clinic } = await supabaseClient
         .from('clinics')
         .select('pin_code, pin_expires_at')
         .eq('id', clinic_id)
         .single()
-        
-        if (clinic && clinic.pin_code === pin) {
-             const expires = new Date(clinic.pin_expires_at)
-             if (expires > new Date()) {
-                 isPinValid = true
-             }
+
+      if (clinic && clinic.pin_code === pin) {
+        const expires = new Date(clinic.pin_expires_at)
+        if (expires > new Date()) {
+          isPinValid = true
         }
+      }
     }
 
     if (!isPinValid) {
       throw new Error('Invalid or expired PIN')
     }
 
-    // 2. Find Next Patient
+    // 2. Find next waiting patient from canonical queues table
     const { data: nextPatient, error: queueError } = await supabaseClient
-      .from('unified_queue')
-      .select('*')
+      .from('queues')
+      .select('id, clinic_id, patient_id, queue_number_int, display_number, queue_number, status')
       .eq('clinic_id', clinic_id)
       .eq('status', 'waiting')
-      .order('position', { ascending: true })
+      .order('queue_number_int', { ascending: true, nullsFirst: false })
       .limit(1)
       .maybeSingle()
+
+    if (queueError) throw queueError
 
     if (!nextPatient) {
       return new Response(
@@ -76,36 +74,33 @@ serve(async (req) => {
       )
     }
 
-    // 3. Update Status to 'called'
+    // 3. Update status to called
     const { data: updatedQueue, error: updateError } = await supabaseClient
-      .from('unified_queue')
+      .from('queues')
       .update({
         status: 'called',
         called_at: new Date().toISOString()
       })
       .eq('id', nextPatient.id)
-      .select()
+      .select('*')
       .single()
 
     if (updateError) throw updateError
 
-    // 4. Trigger Realtime Event (SSE/Broadcast)
-    // Insert into events table
+    // 4. Broadcast event
+    const ticket = nextPatient.display_number ?? nextPatient.queue_number_int ?? nextPatient.queue_number ?? null
     await supabaseClient.from('events').insert({
-        event_type: 'YOUR_TURN',
-        clinic_id: clinic_id,
-        patient_id: nextPatient.patient_id,
-        payload: {
-            ticket: nextPatient.ticket_number,
-            clinic: clinic_id
-        }
+      event_type: 'YOUR_TURN',
+      clinic_id,
+      patient_id: nextPatient.patient_id,
+      payload: { ticket, clinic: clinic_id }
     })
 
     return new Response(
       JSON.stringify({
         success: true,
         data: updatedQueue,
-        message: `Calling ticket ${nextPatient.ticket_number}`
+        message: ticket ? `Calling ticket ${ticket}` : 'Calling next patient'
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
