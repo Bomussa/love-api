@@ -42,7 +42,7 @@ function createAdminToken(admin) {
     sub: admin.id,
     username: admin.username,
     role: admin.role || 'admin',
-    exp: Date.now() + (24 * 60 * 60 * 1000)
+    exp: Math.floor(Date.now() / 1000) + (24 * 60 * 60)
   }));
   const signature = crypto
     .createHmac('sha256', ADMIN_AUTH_SECRET)
@@ -73,7 +73,15 @@ function verifyAdminToken(authorizationHeader) {
 
   try {
     const decodedPayload = JSON.parse(decodeBase64Url(payload));
-    if (!decodedPayload?.sub || !decodedPayload?.exp || Date.now() > decodedPayload.exp) {
+    if (!decodedPayload?.sub || !decodedPayload?.exp) {
+      return { ok: false };
+    }
+
+    const expMillis = decodedPayload.exp < 1_000_000_000_000
+      ? decodedPayload.exp * 1000
+      : decodedPayload.exp;
+
+    if (Date.now() > expMillis) {
       return { ok: false };
     }
     return { ok: true, payload: decodedPayload };
