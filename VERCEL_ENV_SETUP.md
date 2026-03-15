@@ -8,8 +8,8 @@ To deploy the `love-api` project on Vercel, you need to set the following enviro
 
 ```
 SUPABASE_URL=https://rujwuruuosffcxazymit.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ1and1cnV1b3NmZmN4YXp5bWl0Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2MTM4NzI2NSwiZXhwIjoyMDc2OTYzMjY1fQ.5PWwdcBXgS1FZhwRonSRgdbnUQuXHl5VeIHvr41yUbs
-SERVICE_ROLE_SECRET=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ1and1cnV1b3NmZmN4YXp5bWl0Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2MTM4NzI2NSwiZXhwIjoyMDc2OTYzMjY1fQ.5PWwdcBXgS1FZhwRonSRgdbnUQuXHl5VeIHvr41yUbs
+SUPABASE_SERVICE_ROLE_KEY=<set-in-vercel-environment>
+SERVICE_ROLE_SECRET=<set-in-vercel-environment>
 ```
 
 ### 2. API Configuration (Optional)
@@ -54,3 +54,4 @@ Both endpoints should return successful responses if the environment variables a
 - Use `.env.example` as a template for developers
 - Rotate keys periodically for security
 - Keep the Supabase service role key secure and never expose it in client-side code
+- If a key was exposed in Git history, rotate it immediately before redeploying
