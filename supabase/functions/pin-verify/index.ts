@@ -1,7 +1,7 @@
 // Supabase Edge Function: pin-verify
-// Verify PIN and mark as used
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { verifyPin } from '../_shared/pin-service.js';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -28,37 +28,10 @@ serve(async (req: Request) => {
       );
     }
 
-    const now = new Date().toISOString();
-
-    // Find valid PIN
-    const { data: pinRecord, error: e1 } = await db
-      .from('pins')
-      .select('*')
-      .eq('clinic_id', clinic_id)
-      .eq('pin', pin)
-      .is('used_at', null)
-      .gt('valid_until', now)
-      .order('id', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (e1) throw e1;
-
-    const valid = !!pinRecord;
-    let remaining_seconds = 0;
-
-    if (valid && pinRecord) {
-      // Mark as used
-      await db
-        .from('pins')
-        .update({ used_at: now })
-        .eq('id', pinRecord.id);
-
-      remaining_seconds = Math.max(
-        0,
-        Math.floor((new Date(pinRecord.valid_until).getTime() - Date.now()) / 1000),
-      );
-    }
+    const { valid, pinRecord } = await verifyPin(db, clinic_id, pin);
+    const remaining_seconds = pinRecord
+      ? Math.max(0, Math.floor((new Date(pinRecord.valid_until).getTime() - Date.now()) / 1000))
+      : 0;
 
     return new Response(
       JSON.stringify({
