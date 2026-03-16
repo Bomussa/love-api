@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 import delegatedV1Handler from '../lib/api-handlers.js';
 import { createAdminToken, verifyAdminBearerToken, hasValidAdminSecret } from '../lib/admin-auth.js';
+import { applyCorsPolicy } from '../lib/cors-policy.js';
 
 // ==================== CONFIGURATION ====================
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -108,11 +109,15 @@ function getPathId(pathname, basePath) {
 
 // ==================== API HANDLER ====================
 export default async function handler(req, res) {
-  // Set CORS headers
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  const cors = applyCorsPolicy(req, res);
   res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+
+  if (!cors.allowed) {
+    return res.status(403).json({
+      success: false,
+      error: 'Origin is not allowed by CORS policy.',
+    });
+  }
 
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
