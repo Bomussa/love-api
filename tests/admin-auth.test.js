@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createAdminToken, verifyAdminBearerToken, hasValidAdminSecret } from '../lib/admin-auth.js';
+import crypto from 'node:crypto';
+import { createAdminToken, verifyAdminBearerToken, hasValidAdminSecret, verifyPasswordHash } from '../lib/admin-auth.js';
 
 const secret = 'x'.repeat(32);
 
@@ -56,4 +57,16 @@ test('verifyAdminBearerToken rejects malformed authorization values', () => {
   assert.equal(verifyAdminBearerToken(token, secret, now + 1_000), false);
   assert.equal(verifyAdminBearerToken(`Bearer`, secret, now + 1_000), false);
   assert.equal(verifyAdminBearerToken(`Bearer   `, secret, now + 1_000), false);
+});
+
+
+test('verifyPasswordHash validates scrypt hashes and rejects invalid inputs', () => {
+  const password = 'StrongPassword!123';
+  const salt = 'abc123def456';
+  const hash = crypto.scryptSync(password, salt, 64).toString('hex');
+  const passwordHash = `${salt}:${hash}`;
+
+  assert.equal(verifyPasswordHash(password, passwordHash), true);
+  assert.equal(verifyPasswordHash('wrong-password', passwordHash), false);
+  assert.equal(verifyPasswordHash(password, 'invalid-format'), false);
 });
