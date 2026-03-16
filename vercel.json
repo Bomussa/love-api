@@ -12,8 +12,9 @@
     }
   ],
   "rewrites": [
-    { "source": "/api/health", "destination": "/api/v1.js" },
+    { "source": "/api/health", "destination": "/api/health.js" },
     { "source": "/api/v1/health", "destination": "/api/v1.js" },
+    { "source": "/api/v1/status", "destination": "/api/v1.js" },
     { "source": "/api/v1/qa/deep_run", "destination": "/api/v1.js" },
     { "source": "/api/v1/(.*)", "destination": "/api/v1.js" }
   ]
