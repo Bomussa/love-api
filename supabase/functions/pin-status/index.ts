@@ -21,8 +21,9 @@ serve(async (req: Request) => {
     const db = createClient(SUPABASE_URL, SERVICE_KEY);
     const { searchParams } = new URL(req.url);
     const clinic_id = searchParams.get('clinic_id') || searchParams.get('clinicId');
+    const normalizedClinicId = clinic_id?.trim() ?? '';
 
-    if (!clinic_id) {
+    if (!normalizedClinicId) {
       return new Response(
         JSON.stringify({ success: false, error: 'clinic_id parameter required' }),
         { status: 400, headers: { 'content-type': 'application/json', ...corsHeaders } },
@@ -30,7 +31,7 @@ serve(async (req: Request) => {
     }
 
     const now = new Date().toISOString();
-    const { hasActivePin, pinRecord } = await getPinStatus(db, clinic_id);
+    const { hasActivePin, pinRecord } = await getPinStatus(db, normalizedClinicId);
 
     if (hasActivePin && pinRecord) {
       const expiresIn = Math.floor((new Date(pinRecord.valid_until).getTime() - Date.now()) / 1000);
@@ -38,7 +39,7 @@ serve(async (req: Request) => {
         JSON.stringify({
           success: true,
           data: {
-            clinic_id,
+            clinic_id: normalizedClinicId,
             has_active_pin: true,
             pin: pinRecord.pin,
             pin_id: pinRecord.id,
@@ -56,7 +57,7 @@ serve(async (req: Request) => {
       JSON.stringify({
         success: true,
         data: {
-          clinic_id,
+          clinic_id: normalizedClinicId,
           has_active_pin: false,
           pin: null,
           checked_at: now,

@@ -19,12 +19,14 @@ serve(async (req) => {
     );
 
     const { clinic_id, pin } = await req.json();
+    const normalizedClinicId = typeof clinic_id === 'string' ? clinic_id.trim() : '';
+    const normalizedPin = typeof pin === 'string' ? pin.trim() : '';
 
-    if (!clinic_id || !pin) {
+    if (!normalizedClinicId || !normalizedPin) {
       throw new Error('Missing clinic_id or pin');
     }
 
-    const isPinValid = await assertPinValidForQueueAction(supabaseClient, clinic_id, pin);
+    const isPinValid = await assertPinValidForQueueAction(supabaseClient, normalizedClinicId, normalizedPin);
     if (!isPinValid) {
       throw new Error('Invalid or expired PIN');
     }
@@ -32,7 +34,7 @@ serve(async (req) => {
     const { data: nextPatient, error: queueError } = await supabaseClient
       .from('queues')
       .select('id, clinic_id, patient_id, queue_number_int, display_number, queue_number, status')
-      .eq('clinic_id', clinic_id)
+      .eq('clinic_id', normalizedClinicId)
       .eq('status', 'waiting')
       .eq('queue_date', new Date().toISOString().slice(0, 10))
       .order('queue_number_int', { ascending: true, nullsFirst: false })
@@ -63,9 +65,9 @@ serve(async (req) => {
     const ticket = nextPatient.display_number ?? nextPatient.queue_number_int ?? nextPatient.queue_number ?? null;
     await supabaseClient.from('events').insert({
       event_type: 'YOUR_TURN',
-      clinic_id,
+      clinic_id: normalizedClinicId,
       patient_id: nextPatient.patient_id,
-      payload: { ticket, clinic: clinic_id },
+      payload: { ticket, clinic: normalizedClinicId },
     });
 
     return new Response(

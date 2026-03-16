@@ -20,15 +20,17 @@ serve(async (req: Request) => {
   try {
     const db = createClient(SUPABASE_URL, SERVICE_KEY);
     const { clinic_id, pin } = await req.json();
+    const normalizedClinicId = typeof clinic_id === 'string' ? clinic_id.trim() : '';
+    const normalizedPin = typeof pin === 'string' ? pin.trim() : '';
 
-    if (!clinic_id || !pin) {
+    if (!normalizedClinicId || !normalizedPin) {
       return new Response(
         JSON.stringify({ success: false, error: 'clinic_id and pin required' }),
         { status: 400, headers: { 'content-type': 'application/json', ...corsHeaders } },
       );
     }
 
-    const { valid, pinRecord } = await verifyPin(db, clinic_id, pin);
+    const { valid, pinRecord } = await verifyPin(db, normalizedClinicId, normalizedPin);
     const remaining_seconds = pinRecord
       ? Math.max(0, Math.floor((new Date(pinRecord.valid_until).getTime() - Date.now()) / 1000))
       : 0;
@@ -37,6 +39,7 @@ serve(async (req: Request) => {
       JSON.stringify({
         success: true,
         data: {
+          clinic_id: normalizedClinicId,
           valid,
           remaining_seconds,
           message: valid ? 'PIN verified successfully' : 'Invalid or expired PIN',
