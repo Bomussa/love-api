@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveHealthState, evaluateSystemStatus } from '../api/maintenance.js';
+import maintenanceHandler, { resolveHealthState, evaluateSystemStatus } from '../api/maintenance.js';
 
 test('resolveHealthState supports direct healthy payload', () => {
   assert.equal(resolveHealthState({ status: 'healthy' }), 'healthy');
@@ -71,4 +71,49 @@ test('evaluateSystemStatus returns down on non-OK upstream', async () => {
   } finally {
     global.fetch = originalFetch;
   }
+});
+
+test('maintenance handler returns JSON error payload instead of crashing on downstream failure', async () => {
+  const req = { method: 'GET', headers: { host: 'mmc-mms.com' } };
+  const originalFetch = global.fetch;
+  global.fetch = async () => {
+    throw new Error('Synthetic failure');
+  };
+
+  const response = {
+    statusCode: null,
+    jsonPayload: null,
+    headers: {},
+    setHeader(key, value) {
+      this.headers[key] = value;
+      return this;
+    },
+    status(code) {
+      this.statusCode = code;
+      return this;
+    },
+    json(payload) {
+      this.jsonPayload = payload;
+      return this;
+    },
+    end(payload) {
+      this.endPayload = payload;
+      return this;
+    },
+  };
+
+  try {
+    await maintenanceHandler(req, response);
+  } finally {
+    global.fetch = originalFetch;
+  }
+
+  assert.equal(response.statusCode, 503);
+  assert.deepEqual(response.jsonPayload, {
+    success: false,
+    error: 'Service Unavailable',
+    message: 'The system is currently undergoing maintenance or experiencing a critical failure. Please try again later.',
+    maintenance_active: true,
+    system_status: 'down',
+  });
 });
