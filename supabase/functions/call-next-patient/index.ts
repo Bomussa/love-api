@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { assertQueueTransition } from '../_shared/queue-state.js'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -74,7 +75,8 @@ serve(async (req) => {
       )
     }
 
-    // 3. Update status to called
+    // 3. Update status to called (official state machine: waiting -> called)
+    assertQueueTransition(nextPatient.status, 'called', 'call-next-patient')
     const { data: updatedQueue, error: updateError } = await supabaseClient
       .from('queues')
       .update({

@@ -4,6 +4,8 @@
 
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { QUEUE_STATE_ORDER, assertQueueState } from '../_shared/queue-state.js';
+import { buildQueueEngineStatus } from './read-model.js';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')!;
@@ -46,6 +48,10 @@ serve(async (req: Request) => {
     const {
       action, clinic_id, patient_id, patient_name, exam_type, operator_pin,
     } = body;
+
+    if (body.target_status) {
+      assertQueueState(body.target_status, 'queue-engine target_status');
+    }
 
     // التحقق من Kill Switch العام
     const { data: configData } = await serviceClient
@@ -137,30 +143,18 @@ serve(async (req: Request) => {
         break;
 
       case 'get_queue_status':
-        // الحصول على حالة الطابور (قراءة فقط)
+        // الحصول على حالة الطابور (قراءة فقط من المصدر الرسمي)
         const { data: queueData, error: queueError } = await serviceClient
           .from('queues')
           .select('*')
           .eq('clinic_id', clinic_id)
           .gte('entered_at', new Date().toISOString().split('T')[0])
+          .in('status', QUEUE_STATE_ORDER)
           .order('display_number', { ascending: true });
 
         if (queueError) throw queueError;
 
-        const waiting = queueData?.filter((q) => q.status === 'waiting') || [];
-        const serving = queueData?.filter((q) => q.status === 'serving') || [];
-        const completed = queueData?.filter((q) => q.status === 'completed') || [];
-
-        result = {
-          status: 'OK',
-          clinic_id,
-          waiting_count: waiting.length,
-          serving_count: serving.length,
-          completed_count: completed.length,
-          current_number: serving[0]?.display_number || null,
-          last_number: queueData?.[queueData.length - 1]?.display_number || 0,
-          queue: queueData,
-        };
+        result = buildQueueEngineStatus(clinic_id, queueData || []);
         break;
 
       default:

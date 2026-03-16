@@ -2,6 +2,8 @@
 // Get current queue status for a clinic
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { QUEUE_STATE_ORDER, assertQueueState, normalizeQueueState } from '../_shared/queue-state.js';
+import { buildQueueStatusPayload } from './read-model.js';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -29,55 +31,37 @@ serve(async (req: Request) => {
       );
     }
 
-    // Primary source: public.queues (current canonical table)
+    // Primary source: public.queues (canonical table with official statuses)
     const { data: canonicalQueue, error: canonicalError } = await db
       .from('queues')
-      .select('id, queue_number_int, display_number, status, entered_at, called_at, patient_id')
+      .select('id, queue_number_int, display_number, status, entered_at, called_at, completed_at, patient_id')
       .eq('clinic_id', clinic_id)
-      .in('status', ['waiting', 'called'])
+      .in('status', QUEUE_STATE_ORDER)
       .order('queue_number_int', { ascending: true, nullsFirst: false });
 
     if (canonicalError) throw canonicalError;
 
-    // Fallback source: public.unified_queue (legacy data path)
+    // Fallback source: public.unified_queue (legacy path), mapped to canonical statuses
     let queueList = canonicalQueue ?? [];
     if (queueList.length === 0) {
       const { data: legacyQueue, error: legacyError } = await db
         .from('unified_queue')
-        .select('id, queue_position, display_number, status, entered_at, called_at, patient_id')
+        .select('id, queue_position, display_number, status, entered_at, called_at, completed_at, patient_id')
         .eq('clinic_id', clinic_id)
-        .in('status', ['waiting', 'called'])
         .order('queue_position', { ascending: true, nullsFirst: false });
 
       if (legacyError) throw legacyError;
-      queueList = legacyQueue ?? [];
+
+      queueList = (legacyQueue ?? []).map((row: any) => ({
+        ...row,
+        status: assertQueueState(normalizeQueueState(row.status), 'legacy queue status'),
+      }));
     }
-
-    const normalized = queueList.map((row: any) => ({
-      id: row.id,
-      status: row.status,
-      entered_at: row.entered_at,
-      called_at: row.called_at,
-      patient_id: row.patient_id,
-      position: row.queue_number_int ?? row.queue_position ?? row.display_number ?? null,
-    }));
-
-    const serving = normalized.find((q) => q.status === 'called');
-    const waiting = normalized.filter((q) => q.status === 'waiting');
 
     return new Response(
       JSON.stringify({
         success: true,
-        data: {
-          clinic_id,
-          queueLength: waiting.length,
-          totalInQueue: normalized.length,
-          currentServing: serving?.position ?? null,
-          next3: waiting.slice(0, 3).map((q) => ({
-            position: q.position,
-            waiting_since: q.entered_at,
-          })),
-        },
+        data: buildQueueStatusPayload(clinic_id, queueList),
       }),
       { headers: { 'content-type': 'application/json', ...corsHeaders } },
     );

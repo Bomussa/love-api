@@ -164,7 +164,7 @@ BEGIN
   WHERE clinic_id = p_clinic_id
     AND patient_id = p_patient_id
     AND DATE(entered_at) = CURRENT_DATE
-    AND status IN ('waiting', 'serving')
+    AND status IN ('waiting', 'called', 'in_service')
   LIMIT 1;
 
   IF v_existing IS NOT NULL THEN
@@ -241,7 +241,7 @@ BEGIN
   -- إنهاء أي مريض يتم خدمته حاليًا
   UPDATE public.queues
   SET status = 'completed', completed_at = NOW(), completed_by_pin = p_operator_pin
-  WHERE clinic_id = p_clinic_id AND status = 'serving';
+  WHERE clinic_id = p_clinic_id AND status = 'in_service';
 
   -- الحصول على المريض التالي
   SELECT * INTO v_next
@@ -261,14 +261,14 @@ BEGIN
 
   -- تحديث حالة المريض
   UPDATE public.queues
-  SET status = 'serving', called_at = NOW()
+  SET status = 'called', called_at = NOW()
   WHERE id = v_next.id;
 
   -- تسجيل في Audit Log
   INSERT INTO public.audit_log (action, old_state, new_state, payload)
   VALUES ('PATIENT_CALLED', 
     v_old_state,
-    jsonb_build_object('status', 'serving', 'called_at', NOW()),
+    jsonb_build_object('status', 'called', 'called_at', NOW()),
     jsonb_build_object(
       'clinic_id', p_clinic_id,
       'patient_id', v_next.patient_id,
@@ -312,7 +312,7 @@ BEGIN
   FROM public.queues
   WHERE clinic_id = p_clinic_id
     AND patient_id = p_patient_id
-    AND status IN ('waiting', 'serving')
+    AND status IN ('called', 'in_service')
     AND DATE(entered_at) = CURRENT_DATE
   LIMIT 1;
 
@@ -322,7 +322,13 @@ BEGIN
 
   v_old_state := to_jsonb(v_queue);
 
-  -- تحديث الحالة
+  -- تحديث الحالة حسب المسار الرسمي: called -> in_service -> completed
+  IF v_queue.status::text = 'called' THEN
+    UPDATE public.queues
+    SET status = 'in_service'
+    WHERE id = v_queue.id;
+  END IF;
+
   UPDATE public.queues
   SET status = 'completed', 
       completed_at = NOW(),
