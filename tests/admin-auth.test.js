@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createAdminToken, verifyAdminBearerToken, hasValidAdminSecret } from '../lib/admin-auth.js';
+import crypto from 'node:crypto';
+import { createAdminToken, verifyAdminBearerToken, hasValidAdminSecret, resolveAdminLoginStatus } from '../lib/admin-auth.js';
 
 const secret = 'x'.repeat(32);
 
@@ -56,4 +57,42 @@ test('verifyAdminBearerToken rejects malformed authorization values', () => {
   assert.equal(verifyAdminBearerToken(token, secret, now + 1_000), false);
   assert.equal(verifyAdminBearerToken(`Bearer`, secret, now + 1_000), false);
   assert.equal(verifyAdminBearerToken(`Bearer   `, secret, now + 1_000), false);
+});
+
+
+test('admin login returns 200 for correct password', () => {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const password = 'StrongPass123!';
+  const password_hash = `${salt}:${crypto.scryptSync(password, salt, 64).toString('hex')}`;
+
+  const status = resolveAdminLoginStatus({
+    username: 'root',
+    password,
+    admin: { username: 'root', password_hash },
+  });
+
+  assert.equal(status, 200);
+});
+
+test('admin login returns 401 for incorrect password', () => {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const password_hash = `${salt}:${crypto.scryptSync('CorrectPass123!', salt, 64).toString('hex')}`;
+
+  const status = resolveAdminLoginStatus({
+    username: 'root',
+    password: 'WrongPass123!',
+    admin: { username: 'root', password_hash },
+  });
+
+  assert.equal(status, 401);
+});
+
+test('admin login returns 401 for non-existent user', () => {
+  const status = resolveAdminLoginStatus({
+    username: 'ghost-user',
+    password: 'AnyPass123!',
+    admin: null,
+  });
+
+  assert.equal(status, 401);
 });
