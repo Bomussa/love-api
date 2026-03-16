@@ -29,6 +29,16 @@ serve(async (req) => {
       throw new Error('Invalid or expired PIN');
     }
 
+
+    await supabaseClient
+      .from('queues')
+      .update({
+        status: 'in_service',
+      })
+      .eq('clinic_id', clinic_id)
+      .eq('queue_date', new Date().toISOString().slice(0, 10))
+      .eq('status', 'called');
+
     const { data: nextPatient, error: queueError } = await supabaseClient
       .from('queues')
       .select('id, clinic_id, patient_id, queue_number_int, display_number, queue_number, status')
@@ -55,6 +65,7 @@ serve(async (req) => {
         called_at: new Date().toISOString(),
       })
       .eq('id', nextPatient.id)
+      .eq('status', 'waiting')
       .select('*')
       .single();
 
