@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 import delegatedV1Handler from '../lib/api-handlers.js';
-import { createAdminToken, verifyAdminBearerToken, hasValidAdminSecret } from '../lib/admin-auth.js';
+import { createAdminToken, verifyAdminBearerToken, hasValidAdminSecret, verifyAdminPassword } from '../lib/admin-auth.js';
 
 // ==================== CONFIGURATION ====================
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -37,24 +37,6 @@ function verifyAdminToken(authorizationHeader) {
 
 function getAuthorizationHeader(headers = {}) {
   return headers.authorization || headers.Authorization || '';
-}
-
-function verifyPassword(password, passwordHash) {
-  if (!passwordHash || typeof passwordHash !== 'string' || !passwordHash.includes(':')) {
-    return false;
-  }
-
-  const [salt, storedHash] = passwordHash.split(':');
-  if (!salt || !storedHash || storedHash.length !== 128 || !/^[a-f0-9]+$/i.test(storedHash)) {
-    return false;
-  }
-
-  const derived = crypto.scryptSync(password, salt, 64).toString('hex');
-  if (derived.length !== storedHash.length) {
-    return false;
-  }
-
-  return crypto.timingSafeEqual(Buffer.from(storedHash, 'hex'), Buffer.from(derived, 'hex'));
 }
 
 function validateAdminData(payload, { isUpdate = false } = {}) {
@@ -293,6 +275,12 @@ export default async function handler(req, res) {
         if (!validation.ok) return res.status(400).json({ success: false, errors: validation.errors });
 
         const updates = {};
+        if (body.currentPassword) {
+          const { data: existingAdmin } = await safeDbCall(supabase.from('admins').select('password_hash').eq('id', id).maybeSingle());
+          if (!existingAdmin || !verifyAdminPassword(body.currentPassword, existingAdmin.password_hash)) {
+            return res.status(401).json({ success: false, error: 'Current password is invalid' });
+          }
+        }
         if (body.username) updates.username = body.username;
         if (body.password) updates.password_hash = hashPassword(body.password);
         if (body.role) updates.role = body.role;
