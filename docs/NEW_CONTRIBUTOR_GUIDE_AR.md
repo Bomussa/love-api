@@ -27,7 +27,7 @@
   - منطق أعمال مشترك في TypeScript (مثل `queue.ts`).
   - طبقات تكامل Supabase (`supabase.ts` وغيرها).
 
-- `supabase/migrations/` + `migrations/`
+- `supabase/migrations/` فقط (و`legacy/migrations/` للأرشفة فقط)
   - تطورات قاعدة البيانات وعمليات التصحيح/التحسين المتتالية.
 
 - `docs/`
@@ -94,8 +94,8 @@ Client → endpoint (أو `api-router`) → Edge Function متخصصة → RPC/Q
 - اقرأ `supabase/functions/patient-login/index.ts`.
 
 ### اليوم 5: قاعدة البيانات
-- راجع `supabase/schema.sql`.
-- راجع أحدث ملفات migrations لمعرفة “ما الذي تغير بعد schema الأساسي”.
+- راجع `docs/DB_SOURCE_OF_TRUTH.md` لمعرفة المصدر الرسمي.
+- راجع أحدث ملفات `supabase/migrations/` لمعرفة التغييرات المعتمدة.
 
 ### اليوم 6–7: صيانة وتحسين
 - اختر endpoint واحد واعمِل tracing كامل له من الطلب حتى الكتابة في DB.
