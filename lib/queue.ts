@@ -72,7 +72,7 @@ export async function getQueueSnapshot(clinicId: string): Promise<QueueSnapshot>
       .select('status')
       .eq('clinic_id', clinicId)
       .neq('status', 'completed');
-
+    
     if (error) throw error;
 
     const snapshot: QueueSnapshot = {
