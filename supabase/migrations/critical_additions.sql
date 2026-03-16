@@ -133,7 +133,20 @@ BEGIN
 END;
 $$;
 
--- 10) دالة دخول الطابور الآمنة مع القفل التنافسي
+
+-- 10) حارس حالة الطابور الرسمية
+CREATE OR REPLACE FUNCTION public.assert_queue_status_official(p_status TEXT)
+RETURNS VOID
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF p_status NOT IN ('waiting', 'called', 'in_service', 'completed') THEN
+    RAISE EXCEPTION 'INVALID_QUEUE_STATUS: %', p_status;
+  END IF;
+END;
+$$;
+
+-- 11) دالة دخول الطابور الآمنة مع القفل التنافسي
 CREATE OR REPLACE FUNCTION public.enter_queue_safe(
   p_clinic_id TEXT,
   p_patient_id TEXT,
@@ -164,7 +177,7 @@ BEGIN
   WHERE clinic_id = p_clinic_id
     AND patient_id = p_patient_id
     AND DATE(entered_at) = CURRENT_DATE
-    AND status IN ('waiting', 'called')
+    AND status IN ('waiting', 'called', 'in_service')
   LIMIT 1;
 
   IF v_existing IS NOT NULL THEN
@@ -179,6 +192,9 @@ BEGIN
 
   -- توليد الرقم الآمن
   v_pin := public.generate_pin_safe(p_clinic_id);
+
+  -- التحقق من الحالة الرسمية قبل الإدخال
+  PERFORM public.assert_queue_status_official('waiting');
 
   -- إدخال في الطابور
   INSERT INTO public.queues (clinic_id, patient_id, display_number, status, entered_at)
@@ -217,7 +233,7 @@ EXCEPTION
 END;
 $$;
 
--- 11) دالة نداء المريض التالي مع القفل
+-- 12) دالة نداء المريض التالي مع القفل
 CREATE OR REPLACE FUNCTION public.call_next_patient_safe(
   p_clinic_id TEXT,
   p_operator_pin TEXT DEFAULT NULL
@@ -238,10 +254,13 @@ BEGIN
   -- القفل التنافسي
   PERFORM pg_advisory_xact_lock(hashtext('call_' || p_clinic_id));
 
+  -- التحقق من الحالة الرسمية قبل التحديث
+  PERFORM public.assert_queue_status_official('completed');
+
   -- إنهاء أي مريض يتم خدمته حاليًا
   UPDATE public.queues
   SET status = 'completed', completed_at = NOW(), completed_by_pin = p_operator_pin
-  WHERE clinic_id = p_clinic_id AND status IN ('called', 'serving');
+  WHERE clinic_id = p_clinic_id AND status IN ('called', 'in_service');
 
   -- الحصول على المريض التالي
   SELECT * INTO v_next
@@ -258,6 +277,9 @@ BEGIN
 
   -- حفظ الحالة القديمة
   v_old_state := to_jsonb(v_next);
+
+  -- التحقق من الحالة الرسمية قبل التحديث
+  PERFORM public.assert_queue_status_official('called');
 
   -- تحديث حالة المريض
   UPDATE public.queues
@@ -290,7 +312,7 @@ EXCEPTION
 END;
 $$;
 
--- 12) دالة إنهاء الفحص مع التسجيل
+-- 13) دالة إنهاء الفحص مع التسجيل
 CREATE OR REPLACE FUNCTION public.complete_exam_safe(
   p_clinic_id TEXT,
   p_patient_id TEXT,
@@ -312,7 +334,7 @@ BEGIN
   FROM public.queues
   WHERE clinic_id = p_clinic_id
     AND patient_id = p_patient_id
-    AND status IN ('waiting', 'called')
+    AND status IN ('called', 'in_service')
     AND DATE(entered_at) = CURRENT_DATE
   LIMIT 1;
 
@@ -321,6 +343,9 @@ BEGIN
   END IF;
 
   v_old_state := to_jsonb(v_queue);
+
+  -- التحقق من الحالة الرسمية قبل التحديث
+  PERFORM public.assert_queue_status_official('completed');
 
   -- تحديث الحالة
   UPDATE public.queues
@@ -356,7 +381,7 @@ EXCEPTION
 END;
 $$;
 
--- 13) دالة Health Check
+-- 14) دالة Health Check
 CREATE OR REPLACE FUNCTION public.health_check()
 RETURNS JSONB
 LANGUAGE plpgsql
@@ -380,14 +405,15 @@ BEGIN
 END;
 $$;
 
--- 14) منح الصلاحيات للدوال
+-- 15) منح الصلاحيات للدوال
 GRANT EXECUTE ON FUNCTION public.generate_pin_safe(TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.assert_queue_status_official(TEXT) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.enter_queue_safe(TEXT, TEXT, TEXT, TEXT) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.call_next_patient_safe(TEXT, TEXT) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.complete_exam_safe(TEXT, TEXT, TEXT) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.health_check() TO anon, authenticated;
 
--- 15) إضافة Realtime للجداول الجديدة
+-- 16) إضافة Realtime للجداول الجديدة
 ALTER PUBLICATION supabase_realtime ADD TABLE audit_log;
 
 -- ============================================

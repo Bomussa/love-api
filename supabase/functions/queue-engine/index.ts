@@ -148,7 +148,7 @@ serve(async (req: Request) => {
         if (queueError) throw queueError;
 
         const waiting = queueData?.filter((q) => q.status === 'waiting') || [];
-        const serving = queueData?.filter((q) => q.status === 'called' || q.status === 'serving') || [];
+        const serving = queueData?.filter((q) => q.status === 'called' || q.status === 'in_service') || [];
         const completed = queueData?.filter((q) => q.status === 'completed') || [];
 
         result = {
