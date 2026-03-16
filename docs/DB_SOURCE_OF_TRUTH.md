@@ -47,6 +47,7 @@ The canonical data model is represented by the following table set (public schem
 - `roles`
 - `route_steps`
 - `routes`
+- `settings`
 - `system_config`
 
 > Note: both `queue` and `queues` currently exist for backward compatibility in historical migrations. New work should avoid introducing additional queue table variants.
