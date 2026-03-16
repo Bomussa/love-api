@@ -67,7 +67,9 @@ class QueryBuilder {
 
 const createDb = () => ({
   pins: [],
+  clinics: [{ id: 'c1', pin_code: null }],
   queues: [{ id: 1, clinic_id: 'c1', patient_id: 'p1', status: 'waiting', queue_number_int: 1 }],
+  events: [],
   from(table) { return new QueryBuilder(this, table); },
 });
 
@@ -85,6 +87,36 @@ test('generate → verify → call-next contract stays on pins canonical columns
 
   const validForCallNext = await assertPinValidForQueueAction(db, 'c1', generated.pinRecord.pin);
   assert.equal(validForCallNext, true);
+
+  const { data: nextPatient } = await db
+    .from('queues')
+    .select('id, clinic_id, patient_id, queue_number_int, status')
+    .eq('clinic_id', 'c1')
+    .eq('status', 'waiting')
+    .order('queue_number_int', { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  assert.ok(nextPatient);
+
+  const { data: calledQueue } = await db
+    .from('queues')
+    .update({ status: 'called', called_at: new Date().toISOString() })
+    .eq('id', nextPatient.id)
+    .single();
+
+  assert.equal(calledQueue.status, 'called');
+
+  const ticket = calledQueue.queue_number_int;
+  await db.from('events').insert({
+    event_type: 'YOUR_TURN',
+    clinic_id: 'c1',
+    patient_id: calledQueue.patient_id,
+    payload: { ticket, clinic: 'c1' },
+  });
+
+  assert.equal(db.events.length, 1);
+  assert.equal(db.events[0].event_type, 'YOUR_TURN');
 
   assert.deepEqual(Object.keys(db.pins[0]).sort(), ['clinic_id', 'created_at', 'id', 'pin', 'used_at', 'valid_until']);
 });

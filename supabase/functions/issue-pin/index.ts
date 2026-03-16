@@ -19,12 +19,13 @@ serve(async (req) => {
     );
 
     const { clinic_id } = await req.json();
+    const normalizedClinicId = typeof clinic_id === 'string' ? clinic_id.trim() : '';
 
-    if (!clinic_id) {
+    if (!normalizedClinicId) {
       throw new Error('Missing clinic_id');
     }
 
-    const { pinRecord, isExisting } = await generateDailyPin(supabaseClient, clinic_id);
+    const { pinRecord, isExisting } = await generateDailyPin(supabaseClient, normalizedClinicId);
 
     return new Response(
       JSON.stringify({
