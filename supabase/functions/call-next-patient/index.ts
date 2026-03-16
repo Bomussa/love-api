@@ -29,12 +29,14 @@ serve(async (req) => {
       throw new Error('Invalid or expired PIN');
     }
 
+    const today = new Date().toISOString().slice(0, 10);
+
     const { data: nextPatient, error: queueError } = await supabaseClient
       .from('queues')
       .select('id, clinic_id, patient_id, queue_number_int, display_number, queue_number, status')
       .eq('clinic_id', clinic_id)
       .eq('status', 'waiting')
-      .eq('queue_date', new Date().toISOString().slice(0, 10))
+      .eq('queue_date', today)
       .order('queue_number_int', { ascending: true, nullsFirst: false })
       .limit(1)
       .maybeSingle();

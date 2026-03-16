@@ -142,8 +142,9 @@ serve(async (req: Request) => {
           .from('queues')
           .select('*')
           .eq('clinic_id', clinic_id)
-          .gte('entered_at', new Date().toISOString().split('T')[0])
-          .order('display_number', { ascending: true });
+          .eq('queue_date', new Date().toISOString().slice(0, 10))
+          .order('queue_number_int', { ascending: true, nullsFirst: false })
+          .order('display_number', { ascending: true, nullsFirst: false });
 
         if (queueError) throw queueError;
 

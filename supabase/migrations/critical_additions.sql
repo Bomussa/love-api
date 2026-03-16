@@ -114,7 +114,7 @@ BEGIN
   INTO next_pin
   FROM public.queues
   WHERE clinic_id = p_clinic_id
-    AND DATE(entered_at) = CURRENT_DATE;
+    AND queue_date = CURRENT_DATE;
 
   -- التحقق من الحد الأقصى
   IF next_pin > 9999 THEN
@@ -163,7 +163,7 @@ BEGIN
   FROM public.queues
   WHERE clinic_id = p_clinic_id
     AND patient_id = p_patient_id
-    AND DATE(entered_at) = CURRENT_DATE
+    AND queue_date = CURRENT_DATE
     AND status IN ('waiting', 'called')
   LIMIT 1;
 
@@ -181,8 +181,8 @@ BEGIN
   v_pin := public.generate_pin_safe(p_clinic_id);
 
   -- إدخال في الطابور
-  INSERT INTO public.queues (clinic_id, patient_id, display_number, status, entered_at)
-  VALUES (p_clinic_id, p_patient_id, v_pin, 'waiting', NOW())
+  INSERT INTO public.queues (clinic_id, patient_id, patient_name, exam_type, queue_number_int, display_number, queue_number, queue_date, status, entered_at)
+  VALUES (p_clinic_id, p_patient_id, p_patient_name, p_exam_type, v_pin, v_pin, v_pin::text, CURRENT_DATE, 'waiting', NOW())
   RETURNING id INTO v_queue_id;
 
   -- تسجيل في Audit Log
@@ -248,7 +248,7 @@ BEGIN
   FROM public.queues
   WHERE clinic_id = p_clinic_id
     AND status = 'waiting'
-    AND DATE(entered_at) = CURRENT_DATE
+    AND queue_date = CURRENT_DATE
   ORDER BY queue_number_int ASC NULLS LAST, display_number ASC
   LIMIT 1;
 
@@ -312,8 +312,8 @@ BEGIN
   FROM public.queues
   WHERE clinic_id = p_clinic_id
     AND patient_id = p_patient_id
-    AND status IN ('waiting', 'called')
-    AND DATE(entered_at) = CURRENT_DATE
+    AND status IN ('waiting', 'called', 'serving')
+    AND queue_date = CURRENT_DATE
   LIMIT 1;
 
   IF v_queue IS NULL THEN

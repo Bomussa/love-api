@@ -33,7 +33,8 @@ serve(async (req: Request) => {
       .from('queues')
       .select('id, queue_number_int, display_number, status, entered_at, called_at, patient_id')
       .eq('clinic_id', clinic_id)
-      .in('status', ['waiting', 'called'])
+      .eq('queue_date', new Date().toISOString().slice(0, 10))
+      .in('status', ['waiting', 'called', 'serving'])
       .order('queue_number_int', { ascending: true, nullsFirst: false });
 
     if (error) throw error;
@@ -47,7 +48,7 @@ serve(async (req: Request) => {
       position: row.queue_number_int ?? row.display_number ?? null,
     }));
 
-    const serving = normalized.find((q) => q.status === 'called');
+    const serving = normalized.find((q) => q.status === 'called' || q.status === 'serving');
     const waiting = normalized.filter((q) => q.status === 'waiting');
 
     return new Response(

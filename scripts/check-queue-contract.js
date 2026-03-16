@@ -6,7 +6,10 @@ const ROOT = process.cwd();
 const SCAN_DIRS = ['supabase/functions', 'lib', 'api', 'tests', 'scripts'];
 const ALLOWED_PATH_SEGMENTS = ['supabase/functions/queue-compat', 'scripts/check-queue-contract.js'];
 const CODE_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.mjs', '.cjs']);
-const FORBIDDEN_PATTERNS = [/\.from\(\s*['"]queue['"]\s*\)/g, /\.from\(\s*['"]unified_queue['"]\s*\)/g];
+const FORBIDDEN_PATTERNS = [
+  /\.from\(\s*['"`]queue['"`]\s*\)/g,
+  /\.from\(\s*['"`]unified_queue['"`]\s*\)/g,
+];
 
 const violations = [];
 
