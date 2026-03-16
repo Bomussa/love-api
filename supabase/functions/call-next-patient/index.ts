@@ -61,6 +61,7 @@ serve(async (req) => {
       .select('id, clinic_id, patient_id, queue_number_int, display_number, queue_number, status')
       .eq('clinic_id', clinic_id)
       .eq('status', 'waiting')
+      .eq('queue_date', new Date().toISOString().slice(0, 10))
       .order('queue_number_int', { ascending: true, nullsFirst: false })
       .limit(1)
       .maybeSingle()

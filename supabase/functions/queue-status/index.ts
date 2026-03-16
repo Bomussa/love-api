@@ -1,5 +1,5 @@
 // Supabase Edge Function: queue-status
-// Get current queue status for a clinic
+// Get current queue status for a clinic from canonical public.queues only
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
@@ -29,37 +29,22 @@ serve(async (req: Request) => {
       );
     }
 
-    // Primary source: public.queues (current canonical table)
-    const { data: canonicalQueue, error: canonicalError } = await db
+    const { data: queueRows, error } = await db
       .from('queues')
       .select('id, queue_number_int, display_number, status, entered_at, called_at, patient_id')
       .eq('clinic_id', clinic_id)
       .in('status', ['waiting', 'called'])
       .order('queue_number_int', { ascending: true, nullsFirst: false });
 
-    if (canonicalError) throw canonicalError;
+    if (error) throw error;
 
-    // Fallback source: public.unified_queue (legacy data path)
-    let queueList = canonicalQueue ?? [];
-    if (queueList.length === 0) {
-      const { data: legacyQueue, error: legacyError } = await db
-        .from('unified_queue')
-        .select('id, queue_position, display_number, status, entered_at, called_at, patient_id')
-        .eq('clinic_id', clinic_id)
-        .in('status', ['waiting', 'called'])
-        .order('queue_position', { ascending: true, nullsFirst: false });
-
-      if (legacyError) throw legacyError;
-      queueList = legacyQueue ?? [];
-    }
-
-    const normalized = queueList.map((row: any) => ({
+    const normalized = (queueRows ?? []).map((row: any) => ({
       id: row.id,
       status: row.status,
       entered_at: row.entered_at,
       called_at: row.called_at,
       patient_id: row.patient_id,
-      position: row.queue_number_int ?? row.queue_position ?? row.display_number ?? null,
+      position: row.queue_number_int ?? row.display_number ?? null,
     }));
 
     const serving = normalized.find((q) => q.status === 'called');
