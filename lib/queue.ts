@@ -12,6 +12,33 @@ export interface QueueItem {
   completed_at?: string;
 }
 
+interface QueueRow {
+  id: string;
+  clinic_id: string;
+  patient_id: string;
+  queue_number_int?: number | null;
+  display_number?: number | null;
+  status: QueueItem['status'];
+  exam_type?: string | null;
+  entered_at: string;
+  called_at?: string | null;
+  completed_at?: string | null;
+}
+
+function toQueueItem(row: QueueRow): QueueItem {
+  return {
+    id: row.id,
+    clinic_id: row.clinic_id,
+    patient_id: row.patient_id,
+    position: row.queue_number_int ?? row.display_number ?? 0,
+    status: row.status,
+    exam_type: row.exam_type ?? undefined,
+    entered_at: row.entered_at,
+    called_at: row.called_at ?? undefined,
+    completed_at: row.completed_at ?? undefined,
+  };
+}
+
 export interface QueueSnapshot {
   total: number;
   waiting: number;
@@ -88,11 +115,11 @@ export async function createTicket(
         status: 'waiting',
         entered_at: new Date().toISOString()
       })
-      .select()
+      .select('id, clinic_id, patient_id, queue_number_int, display_number, status, exam_type, entered_at, called_at, completed_at')
       .single();
 
     if (error) throw error;
-    return data as QueueItem;
+    return toQueueItem(data as QueueRow);
   } catch (err) {
     console.error('Error creating ticket:', err);
     throw err;
@@ -142,11 +169,11 @@ export async function updateQueueStatus(
         ...(status === 'completed' && { completed_at: new Date().toISOString() })
       })
       .eq('id', queueId)
-      .select()
+      .select('id, clinic_id, patient_id, queue_number_int, display_number, status, exam_type, entered_at, called_at, completed_at')
       .single();
 
     if (error) throw error;
-    return data as QueueItem;
+    return toQueueItem(data as QueueRow);
   } catch (err) {
     console.error('Error updating queue status:', err);
     throw err;
@@ -160,14 +187,14 @@ export async function getTopWaitingPatients(clinicId: string, limit: number = 10
   try {
     const { data, error } = await supabase
       .from('queues')
-      .select('*')
+      .select('id, clinic_id, patient_id, queue_number_int, display_number, status, exam_type, entered_at, called_at, completed_at')
       .eq('clinic_id', clinicId)
       .eq('status', 'waiting')
       .order('entered_at', { ascending: true })
       .limit(limit);
 
     if (error) throw error;
-    return data as QueueItem[];
+    return (data || []).map((row) => toQueueItem(row as QueueRow));
   } catch (err) {
     console.error('Error getting top waiting patients:', err);
     throw err;

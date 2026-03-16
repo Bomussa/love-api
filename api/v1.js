@@ -1,11 +1,12 @@
 import crypto from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 import delegatedV1Handler from '../lib/api-handlers.js';
+import { createAdminToken, verifyAdminBearerToken, hasValidAdminSecret } from '../lib/admin-auth.js';
 
 // ==================== CONFIGURATION ====================
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY || process.env.SUPABASE_ANON_KEY;
-const ADMIN_AUTH_SECRET = process.env.ADMIN_AUTH_SECRET || process.env.JWT_SECRET;
+const ADMIN_AUTH_SECRET = process.env.ADMIN_AUTH_SECRET;
 
 function getSupabaseClient() {
   if (!SUPABASE_URL || !SUPABASE_KEY) {
@@ -28,66 +29,14 @@ function hashPassword(password) {
   return `${salt}:${hash}`;
 }
 
-function encodeBase64Url(value) {
-  return Buffer.from(value).toString('base64url');
-}
-
-function decodeBase64Url(value) {
-  return Buffer.from(value, 'base64url').toString('utf8');
-}
-
-function createAdminToken(admin) {
-  const header = encodeBase64Url(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
-  const payload = encodeBase64Url(JSON.stringify({
-    sub: admin.id,
-    username: admin.username,
-    role: admin.role || 'admin',
-    exp: Math.floor(Date.now() / 1000) + (24 * 60 * 60)
-  }));
-  const signature = crypto
-    .createHmac('sha256', ADMIN_AUTH_SECRET)
-    .update(`${header}.${payload}`)
-    .digest('base64url');
-  return `${header}.${payload}.${signature}`;
-}
-
 function verifyAdminToken(authorizationHeader) {
-  if (!ADMIN_AUTH_SECRET || typeof authorizationHeader !== 'string' || !authorizationHeader.startsWith('Bearer ')) {
-    return { ok: false };
-  }
+  return {
+    ok: verifyAdminBearerToken(authorizationHeader, ADMIN_AUTH_SECRET),
+  };
+}
 
-  const token = authorizationHeader.slice('Bearer '.length).trim();
-  const [header, payload, signature] = token.split('.');
-  if (!header || !payload || !signature) {
-    return { ok: false };
-  }
-
-  const expectedSignature = crypto
-    .createHmac('sha256', ADMIN_AUTH_SECRET)
-    .update(`${header}.${payload}`)
-    .digest('base64url');
-
-  if (expectedSignature.length !== signature.length || !crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expectedSignature))) {
-    return { ok: false };
-  }
-
-  try {
-    const decodedPayload = JSON.parse(decodeBase64Url(payload));
-    if (!decodedPayload?.sub || !decodedPayload?.exp) {
-      return { ok: false };
-    }
-
-    const expMillis = decodedPayload.exp < 1_000_000_000_000
-      ? decodedPayload.exp * 1000
-      : decodedPayload.exp;
-
-    if (Date.now() > expMillis) {
-      return { ok: false };
-    }
-    return { ok: true, payload: decodedPayload };
-  } catch {
-    return { ok: false };
-  }
+function getAuthorizationHeader(headers = {}) {
+  return headers.authorization || headers.Authorization || '';
 }
 
 function verifyPassword(password, passwordHash) {
@@ -96,7 +45,15 @@ function verifyPassword(password, passwordHash) {
   }
 
   const [salt, storedHash] = passwordHash.split(':');
+  if (!salt || !storedHash || storedHash.length !== 128 || !/^[a-f0-9]+$/i.test(storedHash)) {
+    return false;
+  }
+
   const derived = crypto.scryptSync(password, salt, 64).toString('hex');
+  if (derived.length !== storedHash.length) {
+    return false;
+  }
+
   return crypto.timingSafeEqual(Buffer.from(storedHash, 'hex'), Buffer.from(derived, 'hex'));
 }
 
@@ -191,7 +148,11 @@ export default async function handler(req, res) {
   const isQaMutationPath = pathname === '/api/v1/qa/deep_run' && method === 'POST';
 
   if (isAdminCrudPath || isQaMutationPath) {
-    const authCheck = verifyAdminToken(req.headers.authorization);
+    if (!hasValidAdminSecret(ADMIN_AUTH_SECRET)) {
+      return res.status(503).json({ success: false, error: 'Server is missing secure ADMIN_AUTH_SECRET configuration.' });
+    }
+
+    const authCheck = verifyAdminToken(getAuthorizationHeader(req.headers));
     if (!authCheck.ok) {
       return res.status(401).json({ success: false, error: 'Unauthorized admin access' });
     }
@@ -275,190 +236,92 @@ export default async function handler(req, res) {
             await supabase.from('pins').insert({
               clinic_code: clinic.id,
               pin: newPin,
-              expires_at: expiresAt.toISOString(),
               is_active: true,
-              max_uses: 999
+              expires_at: expiresAt.toISOString(),
+              created_at: now
             });
-            
-            await supabase.from('smart_fixes_log').insert({
-              strategy_name: 'generate_missing_pin',
-              target_id: clinic.id,
-              success: true,
-              details: `Generated PIN ${newPin} for ${clinic.name_ar}`
-            });
-            fixes++;
-          }
-        }
-
-        // 2. Clean up expired sessions
-        const { data: expiredSessions } = await supabase
-          .from('patients')
-          .select('id')
-          .eq('status', 'active')
-          .lt('updated_at', new Date(Date.now() - 24 * 3600000).toISOString());
-          
-        if (expiredSessions && expiredSessions.length > 0) {
-          for (const session of expiredSessions) {
-            await supabase.from('patients').update({ status: 'expired' }).eq('id', session.id);
             fixes++;
           }
         }
 
         return res.status(200).json({
           success: true,
-          ok: true,
-          message: `Self-healing run completed. Applied ${fixes} fixes.`,
-          fixes_applied: fixes
+          message: 'Self-healing run completed',
+          fixes_applied: fixes,
+          timestamp: now
         });
       }
     }
 
-    // 3. Admin login (DB-backed; legacy fallback supported for old rows)
-    if (pathname === '/api/v1/admin/login' && method === 'POST') {
-      const { username, password } = body;
-      const validation = validateAdminData({ username, password });
-      if (!validation.ok) {
-        return res.status(400).json({ success: false, error: validation.errors.join(', ') });
-      }
-
-      const { data: admin, error } = await supabase
-        .from('admins')
-        .select('id, username, role, permissions, is_active, password_hash, password')
-        .eq('username', username.trim())
-        .maybeSingle();
-
-      if (error) {
-        return res.status(500).json({ success: false, error: `Failed to login: ${error.message}` });
-      }
-
-      if (!admin || admin.is_active === false) {
-        return res.status(401).json({ success: false, error: 'Invalid credentials' });
-      }
-
-      const validHash = verifyPassword(password, admin.password_hash);
-      const validLegacy = typeof admin.password === 'string' && admin.password === password;
-      if (!validHash && !validLegacy) {
-        return res.status(401).json({ success: false, error: 'Invalid credentials' });
-      }
-
-      if (validLegacy && !validHash) {
-        await supabase
-          .from('admins')
-          .update({ password_hash: hashPassword(password), updated_at: new Date().toISOString() })
-          .eq('id', admin.id);
-      }
-
-      return res.status(200).json({
-        success: true,
-        data: {
-          id: admin.id,
-          username: admin.username,
-          role: admin.role || 'admin',
-          permissions: Array.isArray(admin.permissions) ? admin.permissions : []
-        },
-        token: createAdminToken(admin)
-      });
-    }
-
-    // 4. Admin management CRUD
-    if (pathname === '/api/v1/admins' && method === 'GET') {
-      const { data, error } = await supabase
-        .from('admins')
-        .select('id, username, role, permissions, is_active, created_at, updated_at')
-        .order('created_at', { ascending: false });
-      if (error) return res.status(500).json({ success: false, error: error.message });
-      return res.status(200).json({ success: true, data: data || [] });
-    }
-
-    if (pathname === '/api/v1/admins' && method === 'POST') {
-      const validation = validateAdminData(body);
-      if (!validation.ok) {
-        return res.status(400).json({ success: false, error: validation.errors.join(', ') });
-      }
-
-      const payload = {
-        username: body.username.trim(),
-        password_hash: hashPassword(body.password),
-        role: body.role || 'staff',
-        permissions: Array.isArray(body.permissions) ? body.permissions : [],
-        is_active: body.is_active !== false
-      };
-
-      const { data, error } = await supabase
-        .from('admins')
-        .insert(payload)
-        .select('id, username, role, permissions, is_active, created_at, updated_at')
-        .single();
-
-      if (error) return res.status(500).json({ success: false, error: error.message });
-      return res.status(201).json({ success: true, data });
-    }
-
-    const adminId = getPathId(pathname, '/api/v1/admins');
-    if (adminId && method === 'PATCH') {
-      const validation = validateAdminData(body, { isUpdate: true });
-      if (!validation.ok) {
-        return res.status(400).json({ success: false, error: validation.errors.join(', ') });
-      }
-
-      const updates = {};
-      if (body.username !== undefined) updates.username = body.username.trim();
-      if (body.password !== undefined) updates.password_hash = hashPassword(body.password);
-      if (body.role !== undefined) updates.role = body.role;
-      if (body.permissions !== undefined) updates.permissions = body.permissions;
-      if (body.is_active !== undefined) updates.is_active = body.is_active;
-      updates.updated_at = new Date().toISOString();
-
-      const { data, error } = await supabase
-        .from('admins')
-        .update(updates)
-        .eq('id', adminId)
-        .select('id, username, role, permissions, is_active, created_at, updated_at')
-        .single();
-
-      if (error) return res.status(500).json({ success: false, error: error.message });
-      return res.status(200).json({ success: true, data });
-    }
-
-    if (adminId && method === 'DELETE') {
-      const { error } = await supabase.from('admins').delete().eq('id', adminId);
-      if (error) return res.status(500).json({ success: false, error: error.message });
-      return res.status(200).json({ success: true });
-    }
-
-    // 5. Stats Dashboard
-    if (pathname === '/api/v1/stats-dashboard') {
-      const { data: clinics } = await safeDbCall(supabase.from('clinics').select('name_ar, id'));
-      const { count: patientsCount } = await supabase.from('patients').select('*', { count: 'exact', head: true });
-      const { count: queueCount } = await supabase.from('queues').select('*', { count: 'exact', head: true });
-
-      return res.status(200).json({
-        success: true,
-        data: {
-          overview: {
-            in_queue_now: queueCount || 0,
-            completed_today: 0,
-            visits_today: 0,
-            unique_patients_today: patientsCount || 0,
-            dynamic_tables_count: 105
-          },
-          clinics: (clinics || []).map((c) => ({ name_ar: c.name_ar, waiting_count: 0, serving_count: 0 })),
-          timestamp: new Date().toISOString()
+    // 3. Admin CRUD Operations
+    if (isAdminCrudPath) {
+      if (method === 'GET') {
+        const id = getPathId(pathname, '/api/v1/admins');
+        if (id) {
+          const { data: admin } = await safeDbCall(supabase.from('admins').select('id, username, role, permissions, created_at').eq('id', id).single());
+          if (!admin) return res.status(404).json({ success: false, error: 'Admin not found' });
+          return res.status(200).json({ success: true, data: admin });
         }
-      });
+        const { data: admins } = await safeDbCall(supabase.from('admins').select('id, username, role, permissions, created_at').order('created_at', { ascending: false }));
+        return res.status(200).json({ success: true, data: admins || [] });
+      }
+
+      if (method === 'POST') {
+        const validation = validateAdminData(body);
+        if (!validation.ok) return res.status(400).json({ success: false, errors: validation.errors });
+
+        const { data: existing } = await safeDbCall(supabase.from('admins').select('id').eq('username', body.username).maybeSingle());
+        if (existing) return res.status(409).json({ success: false, error: 'Username already exists' });
+
+        const password_hash = hashPassword(body.password);
+        const { data: newAdmin, error } = await safeDbCall(supabase.from('admins').insert({
+          username: body.username,
+          password_hash,
+          role: body.role || 'admin',
+          permissions: body.permissions || []
+        }).select().single());
+
+        if (error) throw error;
+        return res.status(201).json({ success: true, data: { id: newAdmin.id, username: newAdmin.username } });
+      }
+
+      if (method === 'PATCH') {
+        const id = getPathId(pathname, '/api/v1/admins');
+        if (!id) return res.status(400).json({ success: false, error: 'Admin ID required' });
+
+        const validation = validateAdminData(body, { isUpdate: true });
+        if (!validation.ok) return res.status(400).json({ success: false, errors: validation.errors });
+
+        const updates = {};
+        if (body.username) updates.username = body.username;
+        if (body.password) updates.password_hash = hashPassword(body.password);
+        if (body.role) updates.role = body.role;
+        if (body.permissions) updates.permissions = body.permissions;
+
+        const { data: updatedAdmin, error } = await safeDbCall(supabase.from('admins').update(updates).eq('id', id).select().single());
+        if (error) throw error;
+        return res.status(200).json({ success: true, data: { id: updatedAdmin.id, username: updatedAdmin.username } });
+      }
+
+      if (method === 'DELETE') {
+        const id = getPathId(pathname, '/api/v1/admins');
+        if (!id) return res.status(400).json({ success: false, error: 'Admin ID required' });
+
+        const { error } = await safeDbCall(supabase.from('admins').delete().eq('id', id));
+        if (error) throw error;
+        return res.status(200).json({ success: true, message: 'Admin deleted successfully' });
+      }
     }
 
-    if (pathname.startsWith('/api/v1/')) {
-      return delegatedV1Handler(req, res);
-    }
+    // 4. Delegated V1 Handlers (Login, Pins, etc.)
+    return await delegatedV1Handler(req, res, { supabase, ADMIN_AUTH_SECRET });
 
-    return res.status(404).json({ success: false, error: `Endpoint not found: ${pathname}` });
-  } catch (error) {
-    console.error('API Critical Error:', error);
+  } catch (err) {
+    console.error('V1 API Error:', err);
     return res.status(500).json({
       success: false,
-      error: error.message,
-      timestamp: new Date().toISOString()
+      error: 'Internal server error',
+      message: err.message
     });
   }
 }
