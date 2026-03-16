@@ -20,15 +20,16 @@ serve(async (req: Request) => {
   try {
     const db = createClient(SUPABASE_URL, SERVICE_KEY);
     const { clinic_id } = await req.json();
+    const normalizedClinicId = typeof clinic_id === 'string' ? clinic_id.trim() : '';
 
-    if (!clinic_id) {
+    if (!normalizedClinicId) {
       return new Response(
         JSON.stringify({ success: false, error: 'clinic_id required' }),
         { status: 400, headers: { 'content-type': 'application/json', ...corsHeaders } },
       );
     }
 
-    const { pinRecord, isExisting } = await generateDailyPin(db, clinic_id);
+    const { pinRecord, isExisting } = await generateDailyPin(db, normalizedClinicId);
     const expiresIn = Math.floor((new Date(pinRecord.valid_until).getTime() - Date.now()) / 1000);
 
     return new Response(
@@ -36,6 +37,7 @@ serve(async (req: Request) => {
         success: true,
         data: {
           pin_id: pinRecord.id,
+          clinic_id: pinRecord.clinic_id,
           pin: pinRecord.pin,
           valid_until: pinRecord.valid_until,
           expires_in_seconds: expiresIn,

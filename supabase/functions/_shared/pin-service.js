@@ -15,7 +15,7 @@ export const getTodayDate = () => new Date().toISOString().split('T')[0];
 export const findLatestValidPin = async (db, clinicId, pin = null) => {
   let query = db
     .from('pins')
-    .select('*')
+    .select('id, clinic_id, pin, valid_until, used_at, created_at')
     .eq('clinic_id', clinicId)
     .gt('valid_until', new Date().toISOString());
 
@@ -50,6 +50,13 @@ export const generateDailyPin = async (db, clinicId) => {
     .single();
 
   if (error) throw error;
+
+  // Legacy cache sync only: pins table remains the source of truth.
+  await db
+    .from('clinics')
+    .update({ pin_code: data.pin })
+    .eq('id', clinicId);
+
   return { pinRecord: data, isExisting: false };
 };
 

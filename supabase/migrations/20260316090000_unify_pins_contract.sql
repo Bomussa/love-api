@@ -79,6 +79,42 @@ COMMENT ON COLUMN public.pins.valid_until IS 'Canonical expiration timestamp for
 COMMENT ON COLUMN public.pins.used_at IS 'When PIN was verified/consumed; nullable.';
 COMMENT ON TABLE public.pins IS 'Source of truth for PIN workflow across generation, verification, and queue calls.';
 
+-- One-way cache sync: keep clinics.pin_code aligned to latest active pin while
+-- keeping public.pins as the canonical source of truth.
+CREATE OR REPLACE FUNCTION public.sync_clinic_pin_cache_from_pins()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  UPDATE public.clinics
+  SET pin_code = NEW.pin
+  WHERE id = NEW.clinic_id
+    AND (
+      pin_code IS DISTINCT FROM NEW.pin
+      OR pin_code IS NULL
+    );
+
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_sync_clinic_pin_cache_from_pins ON public.pins;
+CREATE TRIGGER trg_sync_clinic_pin_cache_from_pins
+AFTER INSERT OR UPDATE OF pin, valid_until, used_at ON public.pins
+FOR EACH ROW
+EXECUTE FUNCTION public.sync_clinic_pin_cache_from_pins();
+
+UPDATE public.clinics c
+SET pin_code = p.pin
+FROM (
+  SELECT DISTINCT ON (clinic_id) clinic_id, pin
+  FROM public.pins
+  WHERE valid_until > NOW()
+  ORDER BY clinic_id, valid_until DESC, created_at DESC
+) p
+WHERE c.id = p.clinic_id
+  AND c.pin_code IS DISTINCT FROM p.pin;
+
 DO $$
 BEGIN
   IF EXISTS (
