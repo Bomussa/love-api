@@ -8,8 +8,7 @@ To deploy the `love-api` project on Vercel, you need to set the following enviro
 
 ```
 SUPABASE_URL=https://rujwuruuosffcxazymit.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=<set-in-vercel-environment>
-SERVICE_ROLE_SECRET=<set-in-vercel-environment>
+SUPABASE_SERVICE_ROLE_KEY=<set-in-vercel-environment>  # required
 ```
 
 ### 2. API Configuration (Optional)
@@ -46,7 +45,7 @@ After setting the environment variables, you can verify they are correctly set b
 1. Accessing the health endpoint: `https://your-vercel-domain.vercel.app/api/v1/health`
 2. Running the deep QA check: `https://your-vercel-domain.vercel.app/api/v1/qa/deep_run`
 
-Both endpoints should return successful responses if the environment variables are correctly configured.
+Both endpoints should return successful responses if SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are correctly configured.
 
 ## Important Notes
 

@@ -106,3 +106,14 @@ test('admin login returns 401 for non-existent user', () => {
 
   assert.equal(status, 401);
 });
+
+
+test('admin login rejects legacy static backdoor credentials', () => {
+  const status = resolveAdminLoginStatus({
+    username: 'bomussa',
+    password: '14490',
+    admin: null,
+  });
+
+  assert.equal(status, 401);
+});

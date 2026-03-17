@@ -4,8 +4,8 @@ import delegatedV1Handler from '../lib/api-handlers.js';
 import { createAdminToken, verifyAdminBearerToken, hasValidAdminSecret, verifyAdminPassword } from '../lib/admin-auth.js';
 
 // ==================== CONFIGURATION ====================
-const SUPABASE_URL = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
-const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY || process.env.SUPABASE_ANON_KEY;
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const ADMIN_AUTH_SECRET = process.env.ADMIN_AUTH_SECRET;
 
 function getSupabaseClient() {
