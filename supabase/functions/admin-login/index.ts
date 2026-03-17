@@ -34,12 +34,13 @@ async function signHmacSha256(payload: string, secret: string): Promise<string> 
   return bytesToBase64Url(new Uint8Array(signature));
 }
 
-async function createAdminJwt(admin: { id: string; username: string; role: string }, secret: string, nowMs = Date.now()): Promise<string> {
+async function createAdminJwt(admin: { id: string; username: string; role: string; permissions: string[] }, secret: string, nowMs = Date.now()): Promise<string> {
   const header = encodeBase64UrlUtf8(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
   const payload = encodeBase64UrlUtf8(JSON.stringify({
     sub: admin.id,
     username: admin.username,
     role: admin.role,
+    permissions: admin.permissions,
     exp: Math.floor(nowMs / 1000) + (24 * 60 * 60),
   }));
   const signature = await signHmacSha256(`${header}.${payload}`, secret);
@@ -110,7 +111,7 @@ serve(async (req) => {
 
     const { data: admin, error: adminError } = await supabase
       .from('admins')
-      .select('id, username, role, password_hash')
+      .select('id, username, role, permissions, password_hash')
       .eq('username', username)
       .maybeSingle();
 
@@ -122,10 +123,15 @@ serve(async (req) => {
     }
 
     const role = admin.role || 'admin';
+    const permissions = Array.isArray(admin.permissions)
+      ? admin.permissions.filter((item) => typeof item === 'string')
+      : [];
+
     const token = await createAdminJwt({
       id: String(admin.id),
       username: admin.username,
       role,
+      permissions,
     }, adminSecret);
 
     return new Response(JSON.stringify({
@@ -134,7 +140,8 @@ serve(async (req) => {
       user: {
         id: admin.id,
         username: admin.username,
-        role
+        role,
+        permissions
       }
     }), {
       headers: { 'content-type': 'application/json', ...corsHeaders }

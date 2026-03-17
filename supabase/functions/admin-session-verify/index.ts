@@ -124,6 +124,9 @@ serve(async (req) => {
 
     const username = String(verification.payload.username ?? 'admin');
     const role = String(verification.payload.role ?? 'admin');
+    const permissions = Array.isArray(verification.payload.permissions)
+      ? verification.payload.permissions.filter((item) => typeof item === 'string')
+      : [];
     const expSeconds = Number(verification.payload.exp);
     const expiresAt = new Date(expSeconds < 1_000_000_000_000 ? expSeconds * 1000 : expSeconds).toISOString();
 
@@ -131,7 +134,7 @@ serve(async (req) => {
       success: true,
       role,
       username,
-      permissions: ['*'],
+      permissions,
       expiresAt
     }), {
       status: 200,
