@@ -122,6 +122,9 @@ export default async function handler(req, res) {
     }
   }
 
+  // Pass pre-parsed body to delegated handlers to avoid double-reading the request stream.
+  req._mmcParsedBody = body;
+
   const { method, url } = req;
   const fullUrl = url.startsWith('http') ? url : `https://${req.headers.host || 'localhost'}${url}`;
   const parsedUrl = new URL(fullUrl);
