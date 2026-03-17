@@ -11,10 +11,6 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        shell: bash
-        working-directory: supabase
     env:
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN || secrets.SUPABASE_PAT }}
       PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
@@ -46,9 +42,10 @@ jobs:
           fi
 
       - name: Deploy all edge functions in repository
+        working-directory: .
         run: |
           set -euo pipefail
-          mapfile -t functions < <(find functions -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | grep -v '^_')
+          mapfile -t functions < <(find supabase/functions -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | grep -v '^_')
 
           if [[ ${#functions[@]} -eq 0 ]]; then
             echo "No deployable functions found under supabase/functions"
@@ -58,9 +55,7 @@ jobs:
           printf 'Found %s functions to deploy\n' "${#functions[@]}"
           for fn in "${functions[@]}"; do
             echo "Deploying $fn"
-            ./supabase functions deploy "$fn" \
-              --project-ref "$PROJECT_REF" \
-              --no-verify-jwt
+            ./supabase functions deploy "$fn"               --project-ref "$PROJECT_REF"               --no-verify-jwt
           done
 
       - name: Verify deployed functions (list)
