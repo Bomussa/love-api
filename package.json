@@ -16,7 +16,8 @@
     "test:contracts": "node --test tests/*.test.js",
     "check:queue-contract": "node scripts/check-queue-contract.js",
     "check:endpoint-contracts": "node scripts/check-endpoint-contracts.js",
-    "check:schema-contract": "node scripts/check-schema-contract.js"
+    "check:schema-contract": "node scripts/check-schema-contract.js",
+    "test:smoke:mmc": "bash scripts/smoke-mmc-domains.sh"
   },
   "devDependencies": {
     "vitest": "^4.1.0"

@@ -5,7 +5,7 @@ export interface QueueItem {
   clinic_id: string;
   patient_id: string;
   position: number;
-  status: 'waiting' | 'called' | 'completed' | 'cancelled';
+  status: 'waiting' | 'called' | 'completed' | 'cancelled' | 'WAITING' | 'YOUR_TURN' | 'DONE' | 'CANCELLED';
   exam_type?: string;
   entered_at: string;
   called_at?: string;
@@ -18,6 +18,7 @@ interface QueueRow {
   patient_id: string;
   queue_number_int?: number | null;
   display_number?: number | null;
+  position?: number | null;
   status: QueueItem['status'];
   exam_type?: string | null;
   entered_at: string;
@@ -25,13 +26,31 @@ interface QueueRow {
   completed_at?: string | null;
 }
 
+type QueueStatus = QueueItem['status'];
+
+function normalizeStatus(status: string): QueueStatus {
+  const value = status?.toUpperCase?.() || '';
+  if (value === 'WAITING') return 'WAITING';
+  if (value === 'CALLED' || value === 'YOUR_TURN') return 'YOUR_TURN';
+  if (value === 'COMPLETED' || value === 'DONE') return 'DONE';
+  if (value === 'CANCELLED') return 'CANCELLED';
+  return status as QueueStatus;
+}
+
+async function resolveQuery<T>(query: Promise<T> | { then?: (...args: any[]) => Promise<T> }): Promise<T> {
+  if (query && typeof (query as any).then === 'function') {
+    return (query as any).then();
+  }
+  return query as Promise<T>;
+}
+
 function toQueueItem(row: QueueRow): QueueItem {
   return {
     id: row.id,
     clinic_id: row.clinic_id,
     patient_id: row.patient_id,
-    position: row.queue_number_int ?? row.display_number ?? 0,
-    status: row.status,
+    position: row.queue_number_int ?? row.display_number ?? row.position ?? 0,
+    status: normalizeStatus(row.status),
     exam_type: row.exam_type ?? undefined,
     entered_at: row.entered_at,
     called_at: row.called_at ?? undefined,
@@ -67,20 +86,22 @@ export async function getNextTicket(clinicId: string): Promise<number> {
  */
 export async function getQueueSnapshot(clinicId: string): Promise<QueueSnapshot> {
   try {
-    const { data, error } = await supabase
+    const { data, error } = await resolveQuery<{ data: Array<{ status: string }> | null; error: any }>(supabase
       .from('queues')
       .select('status')
       .eq('clinic_id', clinicId)
-      .neq('status', 'completed');
+      .neq('status', 'completed'));
     
     if (error) throw error;
 
+    const normalized = (data || []).map((q: any) => normalizeStatus(q.status));
+
     const snapshot: QueueSnapshot = {
-      total: data?.length || 0,
-      waiting: data?.filter((q: any) => q.status === 'waiting').length || 0,
-      your_turn: data?.filter((q: any) => q.status === 'called').length || 0,
+      total: normalized.length,
+      waiting: normalized.filter((status) => status === 'WAITING' || status === 'waiting').length,
+      your_turn: normalized.filter((status) => status === 'YOUR_TURN' || status === 'called').length,
       done: 0,
-      cancelled: data?.filter((q: any) => q.status === 'cancelled').length || 0
+      cancelled: normalized.filter((status) => status === 'CANCELLED' || status === 'cancelled').length
     };
 
     return snapshot;
@@ -158,15 +179,22 @@ export async function getPatientQueuePosition(
  */
 export async function updateQueueStatus(
   queueId: string,
-  status: 'waiting' | 'called' | 'completed' | 'cancelled'
+  status: QueueStatus
 ): Promise<QueueItem> {
   try {
+    const nextStatus = normalizeStatus(status);
+    const dbStatus =
+      nextStatus === 'YOUR_TURN' ? 'called' :
+      nextStatus === 'DONE' ? 'completed' :
+      nextStatus === 'CANCELLED' ? 'cancelled' :
+      'waiting';
+
     const { data, error } = await supabase
       .from('queues')
       .update({
-        status,
-        ...(status === 'called' && { called_at: new Date().toISOString() }),
-        ...(status === 'completed' && { completed_at: new Date().toISOString() })
+        status: dbStatus,
+        ...((nextStatus === 'YOUR_TURN' || nextStatus === 'called') && { called_at: new Date().toISOString() }),
+        ...((nextStatus === 'DONE' || nextStatus === 'completed') && { completed_at: new Date().toISOString() })
       })
       .eq('id', queueId)
       .select('id, clinic_id, patient_id, queue_number_int, display_number, status, exam_type, entered_at, called_at, completed_at')
