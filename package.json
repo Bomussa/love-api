@@ -5,7 +5,7 @@
   "private": true,
   "description": "Medical Committee API - Backend Serverless Functions",
   "engines": {
-    "node": ">=18.0.0"
+    "node": "22.x"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.98.0"

@@ -21,7 +21,7 @@ export default async function handler(req, res) {
     status: 'OK',
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
-    version: '2.0.0',
+    version: '3.9.0-security-hardening',
     platform: 'vercel',
     environment: process.env.NODE_ENV || 'production',
     checks: {
