@@ -4,12 +4,7 @@
 
 BEGIN;
 
--- 1) Normalize legacy states before tightening constraints
-UPDATE public.queues
-SET status = 'in_service'
-WHERE status IN ('serving', 'in_progress');
-
--- 2) Replace any old status check with official lifecycle-only check
+-- 1) Replace any old status check with official lifecycle-only check
 DO $$
 DECLARE
   rec RECORD;
@@ -25,6 +20,15 @@ BEGIN
   END LOOP;
 END
 $$;
+
+-- 2) Normalize legacy states before tightening constraints
+UPDATE public.queues
+SET status = CASE
+  WHEN status IN ('serving', 'in_progress') THEN 'in_service'
+  WHEN status IN ('cancelled', 'no_show', 'skipped') THEN 'completed'
+  ELSE status
+END
+WHERE status IN ('serving', 'in_progress', 'cancelled', 'no_show', 'skipped');
 
 ALTER TABLE public.queues
   ADD CONSTRAINT queues_status_official_lifecycle_check
