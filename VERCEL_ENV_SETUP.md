@@ -2,19 +2,22 @@
 
 ## Required Environment Variables for Vercel
 
-To deploy the `love-api` project on Vercel, you need to set the following environment variables in your Vercel project settings:
+To deploy the `love-api` project on Vercel, you must set the following variables in Project Settings → Environment Variables.
 
-### 1. Supabase Configuration
+## Required variables in every environment
 
-```
+Set these in **Production**, **Preview**, and **Development**:
+
+```bash
 SUPABASE_URL=https://rujwuruuosffcxazymit.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=<set-in-vercel-environment>
-SERVICE_ROLE_SECRET=<set-in-vercel-environment>
+SUPABASE_SERVICE_ROLE_KEY=<your-supabase-service-role-key>
 ```
 
-### 2. API Configuration (Optional)
+> Runtime validation will fail fast if either `SUPABASE_URL` or `SUPABASE_SERVICE_ROLE_KEY` is missing.
 
-```
+## Optional variables (defaults are applied by the app)
+
+```bash
 API_TIMEOUT=30000
 API_RETRY_ATTEMPTS=3
 API_RETRY_DELAY=1000
@@ -29,29 +32,40 @@ FEATURE_ADAPTIVE_POLLING=true
 FEATURE_CIRCUIT_BREAKER=true
 ```
 
+## Environment mapping checklist
+
+- **Production**
+  - `SUPABASE_URL`: production Supabase project URL
+  - `SUPABASE_SERVICE_ROLE_KEY`: production service role key
+- **Preview**
+  - `SUPABASE_URL`: preview/staging Supabase URL (or production if intentionally shared)
+  - `SUPABASE_SERVICE_ROLE_KEY`: matching preview/staging service key
+- **Development**
+  - `SUPABASE_URL`: development/local Supabase URL
+  - `SUPABASE_SERVICE_ROLE_KEY`: matching development service key
+
 ## Steps to Set Environment Variables on Vercel
 
-1. Go to your Vercel project dashboard
-2. Click on "Settings"
-3. Navigate to "Environment Variables"
-4. Add each variable with its corresponding value
-5. Make sure to select the appropriate environments (Production, Preview, Development)
-6. Click "Save"
-7. Redeploy your project to apply the changes
+1. Go to your Vercel project dashboard.
+2. Click **Settings**.
+3. Navigate to **Environment Variables**.
+4. Add each variable with its value.
+5. Select target environments (**Production**, **Preview**, **Development**).
+6. Click **Save**.
+7. Redeploy your project.
 
 ## Verification
 
-After setting the environment variables, you can verify they are correctly set by:
+After setting the variables:
 
-1. Accessing the health endpoint: `https://your-vercel-domain.vercel.app/api/v1/health`
-2. Running the deep QA check: `https://your-vercel-domain.vercel.app/api/v1/qa/deep_run`
+1. Open health endpoint: `https://your-vercel-domain.vercel.app/api/v1/health`
+2. Run deep QA endpoint: `https://your-vercel-domain.vercel.app/api/v1/qa/deep_run`
 
-Both endpoints should return successful responses if the environment variables are correctly configured.
+Both should return successful responses.
 
 ## Important Notes
 
-- Never commit sensitive keys to your repository
-- Use `.env.example` as a template for developers
-- Rotate keys periodically for security
-- Keep the Supabase service role key secure and never expose it in client-side code
-- If a key was exposed in Git history, rotate it immediately before redeploying
+- Never commit sensitive keys to the repository.
+- Keep `SUPABASE_SERVICE_ROLE_KEY` secret and server-side only.
+- Use `.env.example` as a local template.
+- Rotate keys periodically or immediately if exposure is suspected.
