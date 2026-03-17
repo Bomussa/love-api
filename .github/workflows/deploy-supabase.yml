@@ -20,21 +20,13 @@ jobs:
 
       - name: Setup Supabase CLI
         run: |
-          # Remove existing supabase binary file if present (not the directory)
-          if [ -f supabase ]; then
-            rm supabase
-          fi
-          if [ -f supabase.exe ]; then
-            rm supabase.exe
-          fi
-          curl -L -o supabase.tar.gz "https://github.com/supabase/cli/releases/download/v2.58.5/supabase_linux_amd64.tar.gz"
-          tar -xzf supabase.tar.gz
-          rm supabase.tar.gz
-          echo "$(pwd)" >> $GITHUB_PATH
-
-      - name: Verify CLI
-        run: |
-          ./supabase --version
+          # Download and extract Supabase CLI to a temporary directory
+          mkdir -p /tmp/supabase-cli
+          curl -L -o /tmp/supabase-cli/supabase.tar.gz "https://github.com/supabase/cli/releases/download/v2.58.5/supabase_linux_amd64.tar.gz"
+          tar -xzf /tmp/supabase-cli/supabase.tar.gz -C /tmp/supabase-cli
+          rm /tmp/supabase-cli/supabase.tar.gz
+          echo "/tmp/supabase-cli" >> $GITHUB_PATH
+          /tmp/supabase-cli/supabase --version
 
       - name: Validate deployment configuration
         run: |
@@ -62,10 +54,10 @@ jobs:
           printf 'Found %s functions to deploy\n' "${#functions[@]}"
           for fn in "${functions[@]}"; do
             echo "Deploying $fn"
-            ./supabase functions deploy "$fn"               --project-ref "$PROJECT_REF"               --no-verify-jwt
+            /tmp/supabase-cli/supabase functions deploy "$fn"               --project-ref "$PROJECT_REF"               --no-verify-jwt
           done
 
       - name: Verify deployed functions (list)
         run: |
           echo "Listing functions in project: $PROJECT_REF"
-          ./supabase functions list --project-ref "$PROJECT_REF"
+          /tmp/supabase-cli/supabase functions list --project-ref "$PROJECT_REF"
