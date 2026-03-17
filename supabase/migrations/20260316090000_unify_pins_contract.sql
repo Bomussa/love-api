@@ -84,6 +84,8 @@ COMMENT ON TABLE public.pins IS 'Source of truth for PIN workflow across generat
 CREATE OR REPLACE FUNCTION public.sync_clinic_pin_cache_from_pins()
 RETURNS TRIGGER
 LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
 AS $$
 BEGIN
   UPDATE public.clinics
