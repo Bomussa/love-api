@@ -4,15 +4,31 @@ import delegatedV1Handler from '../lib/api-handlers.js';
 import { createAdminToken, verifyAdminBearerToken, hasValidAdminSecret, verifyAdminPassword } from '../lib/admin-auth.js';
 
 // ==================== CONFIGURATION ====================
-const SUPABASE_URL = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
-const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY || process.env.SUPABASE_ANON_KEY;
 const ADMIN_AUTH_SECRET = process.env.ADMIN_AUTH_SECRET;
 
-function getSupabaseClient() {
-  if (!SUPABASE_URL || !SUPABASE_KEY) {
-    return null;
+function getRequiredSupabaseEnv() {
+  const requiredEnv = {
+    SUPABASE_URL: process.env.SUPABASE_URL,
+    SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY,
+  };
+
+  const missing = Object.entries(requiredEnv)
+    .filter(([, value]) => !value)
+    .map(([key]) => key);
+
+  if (missing.length > 0) {
+    throw new Error(
+      `Missing required backend Supabase environment variables: ${missing.join(', ')}. `
+      + 'Set server-only SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY and do not use client key fallbacks.'
+    );
   }
-  return createClient(SUPABASE_URL, SUPABASE_KEY, {
+
+  return requiredEnv;
+}
+
+function getSupabaseClient() {
+  const { SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY } = getRequiredSupabaseEnv();
+  return createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
     auth: {
       autoRefreshToken: true,
       persistSession: false,
@@ -100,11 +116,13 @@ export default async function handler(req, res) {
     return res.status(200).end();
   }
 
-  const supabase = getSupabaseClient();
-  if (!supabase) {
+  let supabase;
+  try {
+    supabase = getSupabaseClient();
+  } catch (error) {
     return res.status(503).json({
       success: false,
-      error: 'Server is missing Supabase environment configuration.'
+      error: error.message,
     });
   }
 
