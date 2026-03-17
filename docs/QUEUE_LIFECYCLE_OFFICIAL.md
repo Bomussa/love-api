@@ -19,6 +19,9 @@ Older environments may still contain legacy values. They must be normalized to t
 
 - `serving` -> `in_service`
 - `in_progress` -> `in_service`
+- `cancelled` -> `completed`
+- `no_show` -> `completed`
+- `skipped` -> `completed`
 
 ## Enforcement
 
