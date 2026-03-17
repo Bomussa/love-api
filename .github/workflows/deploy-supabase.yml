@@ -20,6 +20,8 @@ jobs:
 
       - name: Setup Supabase CLI
         run: |
+          # Remove existing supabase file/directory if present
+          rm -rf supabase.exe supabase
           curl -L -o supabase.tar.gz "https://github.com/supabase/cli/releases/download/v2.58.5/supabase_linux_amd64.tar.gz"
           tar -xzf supabase.tar.gz
           rm supabase.tar.gz
