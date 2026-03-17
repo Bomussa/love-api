@@ -12,8 +12,6 @@
   },
   "scripts": {
     "test": "node --test tests/*.test.js",
-    "check:queue-contract": "node scripts/check-queue-contract.js",
-    "check:endpoint-contracts": "node scripts/check-endpoint-contracts.js",
-    "check:schema-contract": "node scripts/check-schema-contract.js"
+    "check:queue-contract": "node scripts/check-queue-contract.js"
   }
 }
