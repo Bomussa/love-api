@@ -204,27 +204,61 @@ export default async function handler(req, res) {
         
         let fixes = 0;
         for (const clinic of (clinics || [])) {
-          const { data: pin } = await supabase
+          let pin = null;
+
+          const { data: canonicalPin, error: canonicalPinError } = await supabase
             .from('pins')
-            .select('*')
-            .eq('clinic_code', clinic.id)
-            .eq('is_active', true)
-            .gte('expires_at', now)
+            .select('id, clinic_id, pin, valid_until, used_at, created_at')
+            .eq('clinic_id', clinic.id)
+            .is('used_at', null)
+            .gte('valid_until', now)
+            .order('valid_until', { ascending: false })
+            .limit(1)
             .maybeSingle();
-            
+
+          if (!canonicalPinError && canonicalPin) {
+            pin = canonicalPin;
+          }
+
+          if (!pin) {
+            const { data: legacyPin, error: legacyPinError } = await supabase
+              .from('pins')
+              .select('id, clinic_code, pin, expires_at, is_active, used_count, max_uses, created_at')
+              .eq('clinic_code', clinic.id)
+              .eq('is_active', true)
+              .gte('expires_at', now)
+              .order('expires_at', { ascending: false })
+              .limit(1)
+              .maybeSingle();
+
+            if (!legacyPinError && legacyPin) {
+              pin = legacyPin;
+            }
+          }
+
           if (!pin) {
             console.log(`Generating missing PIN for clinic: ${clinic.name_ar}`);
             const newPin = Math.floor(1000 + Math.random() * 9000).toString();
             const expiresAt = new Date();
             expiresAt.setHours(23, 59, 59, 999);
-            
-            await supabase.from('pins').insert({
-              clinic_code: clinic.id,
+
+            const { error: canonicalInsertError } = await supabase.from('pins').insert({
+              clinic_id: clinic.id,
               pin: newPin,
-              is_active: true,
-              expires_at: expiresAt.toISOString(),
+              valid_until: expiresAt.toISOString(),
+              used_at: null,
               created_at: now
             });
+
+            if (canonicalInsertError) {
+              await supabase.from('pins').insert({
+                clinic_code: clinic.id,
+                pin: newPin,
+                is_active: true,
+                expires_at: expiresAt.toISOString(),
+                created_at: now
+              });
+            }
             fixes++;
           }
         }
