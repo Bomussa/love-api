@@ -17,7 +17,8 @@ ALTER TABLE public.queues
   ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
 
 ALTER TABLE public.queues
-  ALTER COLUMN entered_at SET DEFAULT NOW();
+  ALTER COLUMN entered_at SET DEFAULT NOW(),
+  ALTER COLUMN queue_date SET DEFAULT CURRENT_DATE;
 
 UPDATE public.queues
 SET
@@ -37,6 +38,99 @@ ALTER TABLE public.queues
   ALTER COLUMN display_number SET NOT NULL,
   ALTER COLUMN queue_date SET NOT NULL,
   ALTER COLUMN status SET NOT NULL;
+
+-- Keep legacy writers compatible with new NOT NULL contract.
+CREATE OR REPLACE FUNCTION public.enter_queue_safe(
+  p_clinic_id TEXT,
+  p_patient_id TEXT,
+  p_patient_name TEXT DEFAULT NULL,
+  p_exam_type TEXT DEFAULT 'general'
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  v_pin INTEGER;
+  v_queue_id UUID;
+  v_existing RECORD;
+  v_result JSONB;
+BEGIN
+  IF NOT COALESCE((SELECT (value::text)::boolean FROM public.system_config WHERE key = 'system_enabled'), TRUE) THEN
+    RETURN jsonb_build_object('status', 'ABORTED', 'reason', 'SYSTEM_DISABLED');
+  END IF;
+
+  PERFORM pg_advisory_xact_lock(hashtext(p_clinic_id || p_patient_id || current_date::text));
+
+  SELECT * INTO v_existing
+  FROM public.queues
+  WHERE clinic_id = p_clinic_id
+    AND patient_id = p_patient_id
+    AND DATE(entered_at) = CURRENT_DATE
+    AND status IN ('waiting', 'called')
+  LIMIT 1;
+
+  IF v_existing IS NOT NULL THEN
+    RETURN jsonb_build_object(
+      'status', 'ALREADY_IN_QUEUE',
+      'clinic', p_clinic_id,
+      'user', p_patient_id,
+      'number', v_existing.display_number,
+      'message', 'المريض موجود بالفعل في الطابور'
+    );
+  END IF;
+
+  v_pin := public.generate_pin_safe(p_clinic_id);
+
+  INSERT INTO public.queues (
+    clinic_id,
+    patient_id,
+    display_number,
+    queue_number_int,
+    queue_date,
+    status,
+    entered_at
+  )
+  VALUES (
+    p_clinic_id,
+    p_patient_id,
+    v_pin,
+    v_pin,
+    CURRENT_DATE,
+    'waiting',
+    NOW()
+  )
+  RETURNING id INTO v_queue_id;
+
+  INSERT INTO public.audit_log (action, payload)
+  VALUES ('QUEUE_ENTERED', jsonb_build_object(
+    'queue_id', v_queue_id,
+    'clinic_id', p_clinic_id,
+    'patient_id', p_patient_id,
+    'pin', v_pin,
+    'entered_at', NOW() AT TIME ZONE 'UTC'
+  ));
+
+  RETURN jsonb_build_object(
+    'status', 'OK',
+    'clinic', p_clinic_id,
+    'user', p_patient_id,
+    'number', v_pin,
+    'message', 'تم الدخول للطابور بنجاح'
+  );
+
+EXCEPTION
+  WHEN OTHERS THEN
+    INSERT INTO public.audit_log (action, payload)
+    VALUES ('QUEUE_ENTER_FAILED', jsonb_build_object(
+      'clinic_id', p_clinic_id,
+      'patient_id', p_patient_id,
+      'error', SQLERRM
+    ));
+
+    RETURN jsonb_build_object('status', 'ABORTED', 'reason', SQLERRM);
+END;
+$$;
 
 DO $$
 BEGIN
@@ -88,8 +182,8 @@ BEGIN
       q.patient_id::TEXT,
       q.patient_name,
       q.exam_type,
-      COALESCE(q.position, q.ticket_number::INTEGER, 0),
-      COALESCE(q.position, q.ticket_number::INTEGER, 0),
+      COALESCE(q.position, CASE WHEN q.ticket_number ~ '^\d+$' THEN q.ticket_number::INTEGER END, 0),
+      COALESCE(q.position, CASE WHEN q.ticket_number ~ '^\d+$' THEN q.ticket_number::INTEGER END, 0),
       q.ticket_number,
       CASE
         WHEN q.status::TEXT IN ('waiting', 'called', 'serving', 'completed', 'cancelled', 'no_show', 'skipped') THEN q.status::TEXT
