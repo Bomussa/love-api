@@ -1,7 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
-import { createAdminToken, verifyAdminBearerToken, hasValidAdminSecret, verifyPasswordHash, resolveAdminLoginStatus } from '../lib/admin-auth.js';
+import {
+  createAdminToken,
+  verifyAdminBearerToken,
+  hasValidAdminSecret,
+  verifyPasswordHash,
+  verifyAdminPassword,
+  resolveAdminLoginStatus
+} from '../lib/admin-auth.js';
 
 const secret = 'x'.repeat(32);
 
@@ -68,6 +75,14 @@ test('verifyPasswordHash validates scrypt hashes and rejects invalid inputs', ()
   assert.equal(verifyPasswordHash(password, passwordHash), true);
   assert.equal(verifyPasswordHash('wrong-password', passwordHash), false);
   assert.equal(verifyPasswordHash(password, 'invalid-format'), false);
+});
+
+test('verifyAdminPassword remains backward-compatible wrapper around verifyPasswordHash', () => {
+  const password = 'StrongPassword!123';
+  const legacySha = crypto.createHash('sha256').update(password).digest('hex');
+
+  assert.equal(verifyAdminPassword(password, legacySha), true);
+  assert.equal(verifyAdminPassword('wrong-password', legacySha), false);
 });
 
 test('admin login returns 200 for correct password', () => {
