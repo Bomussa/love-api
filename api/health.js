@@ -4,9 +4,9 @@
  */
 
 export default async function handler(req, res) {
-  // CORS headers
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  // CORS headers - using dynamic origin validation
+  const { setCorsHeaders } = await import('../lib/helpers-enhanced.js');
+  setCorsHeaders(res, req);
   res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
 
   if (req.method === 'OPTIONS') {

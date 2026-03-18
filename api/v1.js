@@ -90,10 +90,9 @@ function getPathId(pathname, basePath) {
 
 // ==================== API HANDLER ====================
 export default async function handler(req, res) {
-  // Set CORS headers
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  // Import and apply CORS headers from helpers (dynamic origin validation)
+  const { setCorsHeaders } = await import('../lib/helpers-enhanced.js');
+  setCorsHeaders(res, req);
   res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
 
   if (req.method === 'OPTIONS') {
@@ -238,7 +237,8 @@ export default async function handler(req, res) {
 
           if (!pin) {
             console.log(`Generating missing PIN for clinic: ${clinic.name_ar}`);
-            const newPin = Math.floor(1000 + Math.random() * 9000).toString();
+            // توليد PIN من رقمين فقط (10-99) - موحد مع الواجهة الأمامية والخلفية
+            const newPin = String(Math.floor(Math.random() * 90) + 10).padStart(2, '0');
             const expiresAt = new Date();
             expiresAt.setHours(23, 59, 59, 999);
 
