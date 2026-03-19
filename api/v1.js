@@ -385,9 +385,62 @@ export default async function handler(req, res) {
       }
     }
 
+    // ✅ إصلاح: إضافة نقطة نهاية تسجيل دخول الإدارة مباشرة لضمان استجابة JSON
+    if (pathname === '/api/v1/admin/login' && method === 'POST') {
+      const { username, password } = body;
+      if (!username || !password) {
+        return res.status(400).json({ success: false, error: 'MISSING_CREDENTIALS', message: 'اسم المستخدم وكلمة المرور مطلوبة' });
+      }
+
+      const { data: admin, error: adminError } = await supabase
+        .from('admins')
+        .select('*')
+        .eq('username', username)
+        .maybeSingle();
+
+      if (adminError) {
+        return res.status(500).json({ success: false, error: 'DB_ERROR', message: 'خطأ في قاعدة البيانات أثناء المصادقة' });
+      }
+
+      if (!admin || !verifyAdminPassword(password, admin.password_hash)) {
+        return res.status(401).json({ success: false, error: 'INVALID_CREDENTIALS', message: 'اسم المستخدم أو كلمة المرور غير صحيحة' });
+      }
+
+      if (!hasValidAdminSecret(ADMIN_AUTH_SECRET)) {
+        return res.status(503).json({ success: false, error: 'ADMIN_SECRET_MISSING', message: 'تكوين الخادم غير مكتمل (ADMIN_AUTH_SECRET)' });
+      }
+
+      const nowMs = Date.now();
+      const token = createAdminToken({
+        id: admin.id,
+        username: admin.username,
+        role: admin.role || 'ADMIN',
+      }, ADMIN_AUTH_SECRET, nowMs);
+
+      return res.status(200).json({
+        success: true,
+        data: {
+          session: {
+            username: admin.username,
+            role: admin.role || 'ADMIN',
+            token,
+            expiresAt: new Date(nowMs + 24 * 60 * 60 * 1000).toISOString()
+          }
+        }
+      });
+    }
+
     return await delegatedV1Handler(req, res, { supabase, ADMIN_AUTH_SECRET });
   } catch (err) {
     console.error('V1 API Error:', err);
-    return res.status(500).json({ success: false, error: 'Internal server error', message: err.message });
+    // ✅ ضمان استجابة JSON دائماً حتى في حالة الخطأ غير المتوقع
+    if (!res.headersSent) {
+      return res.status(500).json({ 
+        success: false, 
+        error: 'INTERNAL_SERVER_ERROR', 
+        message: 'حدث خطأ داخلي في الخادم',
+        details: err.message 
+      });
+    }
   }
 }
