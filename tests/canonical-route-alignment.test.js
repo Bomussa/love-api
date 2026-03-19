@@ -24,6 +24,7 @@ test('canonical routes are handled by api/v1.js before legacy delegation', () =>
     "if (pathname === '/api/v1/queue/status' && method === 'GET')",
     "if (pathname === '/api/v1/queue/call' && method === 'POST')",
     "if (pathname === '/api/v1/pin/verify' && method === 'POST')",
+    "if (pathname === '/api/v1/admin/login' && method === 'POST')",
   ];
 
   for (const route of canonicalRoutes) {
@@ -59,6 +60,13 @@ test('patient login and pin verify canonical paths align to DB-backed contracts'
   assert.doesNotMatch(pinVerifyBlock, /KV_PINS/);
 });
 
+test('canonical admin login uses DB-backed admin auth before delegated handling', () => {
+  const adminLoginBlock = extractIfBlock(apiV1Source, "if (pathname === '/api/v1/admin/login' && method === 'POST')");
+  assert.match(adminLoginBlock, /from\('admins'\)/);
+  assert.match(adminLoginBlock, /verifyAdminPassword\(/);
+  assert.match(adminLoginBlock, /createAdminToken\(/);
+});
+
 test('legacy overlapping endpoint implementations are removed from lib/api-handlers.js', () => {
   const removedLegacyRoutes = [
     "pathname === '/api/v1/patient/login'",
@@ -66,6 +74,7 @@ test('legacy overlapping endpoint implementations are removed from lib/api-handl
     "pathname === '/api/v1/queue/status'",
     "pathname === '/api/v1/queue/call'",
     "pathname === '/api/v1/pin/verify'",
+    "pathname === '/api/v1/admin/login'",
   ];
 
   for (const routeSnippet of removedLegacyRoutes) {
