@@ -189,12 +189,24 @@ export default async function handler(req, res) {
       return res.status(200).json({ success: true, verified: true, clinicId });
     }
 
-    if (pathname === '/api/v1/queue/enter' && method === 'POST') {
+        if (pathname === '/api/v1/queue/enter' && method === 'POST') {
       const clinicId = String(body.clinicId || body.clinic_id || '').trim();
       const patientId = normalizePatientIdentifier(body.patientId || body.personalId);
       if (!clinicId || !patientId) {
-        return res.status(400).json({ success: false, error: 'Missing required fields: clinicId and patientId|personalId' });
+        return res.status(400).json({ success: false, error: 'MISSING_REQUIRED_FIELDS', message: 'معرفة العيادة ورقم المراجع مطلوبة' });
       }
+      
+      // ✅ إصلاح: التحقق من وجود العيادة قبل إدخال الطابور
+      const { data: clinic, error: clinicError } = await supabase
+        .from('clinics')
+        .select('id, name')
+        .eq('id', clinicId)
+        .maybeSingle();
+      
+      if (clinicError || !clinic) {
+        return res.status(404).json({ success: false, error: 'CLINIC_NOT_FOUND', message: 'العيادة غير موجودة' });
+      }
+      
       const { data: rpcResult, error: rpcError } = await supabase.rpc('enter_unified_queue_safe', {
         p_clinic_id: clinicId,
         p_patient_id: patientId,
@@ -202,7 +214,7 @@ export default async function handler(req, res) {
         p_exam_type: body.examType || null,
       });
       if (rpcError || !rpcResult || rpcResult.length === 0) {
-        return res.status(503).json({ success: false, error: 'ATOMIC_QUEUE_RPC_UNAVAILABLE', details: rpcError?.message || 'Atomic queue RPC returned no rows' });
+        return res.status(503).json({ success: false, error: 'QUEUE_ENTRY_FAILED', message: 'فشل دخول الطابور', details: rpcError?.message || 'فشل الاستدعاء الموحد' });
       }
       const result = rpcResult[0];
       return res.status(200).json({ success: true, data: { id: result.id, display_number: result.display_number, status: result.status, alreadyExists: result.already_exists } });
