@@ -64,6 +64,7 @@ test('legacy overlapping endpoint implementations are removed from lib/api-handl
     "pathname === '/api/v1/patient/login'",
     "pathname === '/api/v1/queue/enter'",
     "pathname === '/api/v1/queue/status'",
+    "pathname === '/api/v1/queue/call'",
     "pathname === '/api/v1/pin/verify'",
   ];
 
