@@ -164,7 +164,7 @@ export default async function handler(req, res) {
 
   try {
     if (pathname === '/api/v1/health' || pathname === '/api/health') {
-      return res.status(200).json({ status: 'ok', ok: true, version: '3.9.1-contract-alignment', timestamp: new Date().toISOString() });
+      return res.status(200).json({ status: 'ok', ok: true, version: '3.9.2-queue-call-canonical', timestamp: new Date().toISOString() });
     }
 
     if ((pathname === '/api/v1/patient/login' || pathname === '/api/v1/patients/login') && method === 'POST') {
@@ -213,6 +213,95 @@ export default async function handler(req, res) {
       if (!clinicId) return res.status(400).json({ success: false, error: 'MISSING_CLINIC_ID' });
       const payload = await buildQueueStatusPayload(supabase, clinicId);
       return res.status(200).json({ success: true, data: payload });
+    }
+
+    if (pathname === '/api/v1/queue/call' && method === 'POST') {
+      const clinicId = String(body.clinicId || body.clinic_id || '').trim();
+      if (!clinicId) {
+        return res.status(400).json({ success: false, error: 'Missing required field: clinicId|clinic_id' });
+      }
+
+      const queueDate = new Date().toISOString().split('T')[0];
+      const nowIso = new Date().toISOString();
+
+      const { data: activeRows, error: activeRowsError } = await supabase
+        .from('queues')
+        .select('id, display_number, patient_id, status')
+        .eq('clinic_id', clinicId)
+        .eq('queue_date', queueDate)
+        .in('status', ['called', 'serving', 'in_service', 'in_progress']);
+
+      if (activeRowsError) {
+        return res.status(500).json({ success: false, error: 'ACTIVE_QUEUE_LOOKUP_FAILED', details: activeRowsError.message });
+      }
+
+      if (activeRows && activeRows.length > 0) {
+        const activeIds = activeRows.map((row) => row.id);
+        const { error: completeCurrentError } = await supabase
+          .from('queues')
+          .update({ status: 'completed', completed_at: nowIso })
+          .in('id', activeIds);
+
+        if (completeCurrentError) {
+          return res.status(500).json({ success: false, error: 'CURRENT_QUEUE_COMPLETE_FAILED', details: completeCurrentError.message });
+        }
+      }
+
+      const { data: nextRow, error: nextRowError } = await supabase
+        .from('queues')
+        .select('id, clinic_id, patient_id, display_number, status, entered_at')
+        .eq('clinic_id', clinicId)
+        .eq('queue_date', queueDate)
+        .eq('status', 'waiting')
+        .order('entered_at', { ascending: true })
+        .limit(1)
+        .maybeSingle();
+
+      if (nextRowError) {
+        return res.status(500).json({ success: false, error: 'NEXT_QUEUE_LOOKUP_FAILED', details: nextRowError.message });
+      }
+
+      if (!nextRow) {
+        const payload = await buildQueueStatusPayload(supabase, clinicId);
+        return res.status(200).json({
+          success: true,
+          data: {
+            clinicId,
+            currentNumber: payload.currentNumber,
+            queueLength: payload.queueLength,
+            patient: null,
+            message: 'Queue is empty',
+          },
+        });
+      }
+
+      const { data: calledRow, error: calledRowError } = await supabase
+        .from('queues')
+        .update({ status: 'called', called_at: nowIso })
+        .eq('id', nextRow.id)
+        .select('id, clinic_id, patient_id, display_number, status, called_at, entered_at')
+        .single();
+
+      if (calledRowError) {
+        return res.status(500).json({ success: false, error: 'QUEUE_CALL_UPDATE_FAILED', details: calledRowError.message });
+      }
+
+      const payload = await buildQueueStatusPayload(supabase, clinicId);
+      return res.status(200).json({
+        success: true,
+        data: {
+          clinicId,
+          currentNumber: calledRow.display_number,
+          queueLength: payload.queueLength,
+          patient: {
+            id: calledRow.id,
+            patientId: calledRow.patient_id,
+            display_number: calledRow.display_number,
+            status: calledRow.status,
+            called_at: calledRow.called_at,
+          },
+        },
+      });
     }
 
     if (pathname === '/api/v1/qa/deep_run') {

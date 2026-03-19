@@ -22,6 +22,7 @@ test('canonical routes are handled by api/v1.js before legacy delegation', () =>
     "if ((pathname === '/api/v1/patient/login' || pathname === '/api/v1/patients/login') && method === 'POST')",
     "if (pathname === '/api/v1/queue/enter' && method === 'POST')",
     "if (pathname === '/api/v1/queue/status' && method === 'GET')",
+    "if (pathname === '/api/v1/queue/call' && method === 'POST')",
     "if (pathname === '/api/v1/pin/verify' && method === 'POST')",
   ];
 
@@ -38,6 +39,14 @@ test('canonical queue enter uses atomic RPC and has no client-side next-number f
   assert.match(queueEnterBlock, /ATOMIC_QUEUE_RPC_UNAVAILABLE/);
   assert.doesNotMatch(queueEnterBlock, /queue\.patients\.length\s*\+\s*1/);
   assert.doesNotMatch(queueEnterBlock, /from\('queues'\)\.insert/);
+});
+
+test('canonical queue call uses DB-backed queue state instead of KV queues', () => {
+  const queueCallBlock = extractIfBlock(apiV1Source, "if (pathname === '/api/v1/queue/call' && method === 'POST')");
+  assert.match(queueCallBlock, /from\('queues'\)/);
+  assert.match(queueCallBlock, /QUEUE_CALL_UPDATE_FAILED/);
+  assert.doesNotMatch(queueCallBlock, /KV_QUEUES/);
+  assert.doesNotMatch(queueCallBlock, /queue\.patients\.shift/);
 });
 
 test('patient login and pin verify canonical paths align to DB-backed contracts', () => {
