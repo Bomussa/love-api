@@ -164,7 +164,7 @@ export default async function handler(req, res) {
 
   try {
     if (pathname === '/api/v1/health' || pathname === '/api/health') {
-      return res.status(200).json({ status: 'ok', ok: true, version: '3.9.1-contract-alignment', timestamp: new Date().toISOString() });
+      return res.status(200).json({ status: 'ok', ok: true, version: '3.9.2-queue-call-canonical', timestamp: new Date().toISOString() });
     }
 
     if ((pathname === '/api/v1/patient/login' || pathname === '/api/v1/patients/login') && method === 'POST') {
@@ -217,64 +217,90 @@ export default async function handler(req, res) {
 
     if (pathname === '/api/v1/queue/call' && method === 'POST') {
       const clinicId = String(body.clinicId || body.clinic_id || '').trim();
-      if (!clinicId) return res.status(400).json({ success: false, error: 'Missing required field: clinicId' });
-      
-      const today = new Date().toISOString().split('T')[0];
-      
-      // 1. Close any currently active tickets for this clinic
-      await supabase
+      if (!clinicId) {
+        return res.status(400).json({ success: false, error: 'Missing required field: clinicId|clinic_id' });
+      }
+
+      const queueDate = new Date().toISOString().split('T')[0];
+      const nowIso = new Date().toISOString();
+
+      const { data: activeRows, error: activeRowsError } = await supabase
         .from('queues')
-        .update({ status: 'completed', completed_at: new Date().toISOString() })
+        .select('id, display_number, patient_id, status')
         .eq('clinic_id', clinicId)
-        .eq('queue_date', today)
+        .eq('queue_date', queueDate)
         .in('status', ['called', 'serving', 'in_service', 'in_progress']);
 
-      // 2. Find the oldest waiting patient
-      const { data: nextPatient, error: findError } = await supabase
+      if (activeRowsError) {
+        return res.status(500).json({ success: false, error: 'ACTIVE_QUEUE_LOOKUP_FAILED', details: activeRowsError.message });
+      }
+
+      if (activeRows && activeRows.length > 0) {
+        const activeIds = activeRows.map((row) => row.id);
+        const { error: completeCurrentError } = await supabase
+          .from('queues')
+          .update({ status: 'completed', completed_at: nowIso })
+          .in('id', activeIds);
+
+        if (completeCurrentError) {
+          return res.status(500).json({ success: false, error: 'CURRENT_QUEUE_COMPLETE_FAILED', details: completeCurrentError.message });
+        }
+      }
+
+      const { data: nextRow, error: nextRowError } = await supabase
         .from('queues')
-        .select('*')
+        .select('id, clinic_id, patient_id, display_number, status, entered_at')
         .eq('clinic_id', clinicId)
-        .eq('queue_date', today)
+        .eq('queue_date', queueDate)
         .eq('status', 'waiting')
         .order('entered_at', { ascending: true })
         .limit(1)
         .maybeSingle();
 
-      if (findError) throw findError;
+      if (nextRowError) {
+        return res.status(500).json({ success: false, error: 'NEXT_QUEUE_LOOKUP_FAILED', details: nextRowError.message });
+      }
 
-      if (!nextPatient) {
+      if (!nextRow) {
+        const payload = await buildQueueStatusPayload(supabase, clinicId);
         return res.status(200).json({
           success: true,
-          clinicId,
-          currentNumber: 0,
-          message: 'Queue is empty'
+          data: {
+            clinicId,
+            currentNumber: payload.currentNumber,
+            queueLength: payload.queueLength,
+            patient: null,
+            message: 'Queue is empty',
+          },
         });
       }
 
-      // 3. Update patient to called
-      const { data: updated, error: updateError } = await supabase
+      const { data: calledRow, error: calledRowError } = await supabase
         .from('queues')
-        .update({ 
-          status: 'called', 
-          called_at: new Date().toISOString() 
-        })
-        .eq('id', nextPatient.id)
-        .select()
+        .update({ status: 'called', called_at: nowIso })
+        .eq('id', nextRow.id)
+        .select('id, clinic_id, patient_id, display_number, status, called_at, entered_at')
         .single();
 
-      if (updateError) throw updateError;
+      if (calledRowError) {
+        return res.status(500).json({ success: false, error: 'QUEUE_CALL_UPDATE_FAILED', details: calledRowError.message });
+      }
 
+      const payload = await buildQueueStatusPayload(supabase, clinicId);
       return res.status(200).json({
         success: true,
-        clinicId,
-        currentNumber: updated.display_number,
-        patient: {
-          id: updated.id,
-          position: updated.display_number,
-          patientId: updated.patient_id,
-          enteredAt: updated.entered_at,
-          calledAt: updated.called_at
-        }
+        data: {
+          clinicId,
+          currentNumber: calledRow.display_number,
+          queueLength: payload.queueLength,
+          patient: {
+            id: calledRow.id,
+            patientId: calledRow.patient_id,
+            display_number: calledRow.display_number,
+            status: calledRow.status,
+            called_at: calledRow.called_at,
+          },
+        },
       });
     }
 

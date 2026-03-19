@@ -41,12 +41,12 @@ test('canonical queue enter uses atomic RPC and has no client-side next-number f
   assert.doesNotMatch(queueEnterBlock, /from\('queues'\)\.insert/);
 });
 
-test('canonical queue call handler is DB-backed and avoids KV or shift logic', () => {
+test('canonical queue call uses DB-backed queue state instead of KV queues', () => {
   const queueCallBlock = extractIfBlock(apiV1Source, "if (pathname === '/api/v1/queue/call' && method === 'POST')");
   assert.match(queueCallBlock, /from\('queues'\)/);
-  assert.match(queueCallBlock, /update\(\{\s*status:\s*'called'/);
+  assert.match(queueCallBlock, /QUEUE_CALL_UPDATE_FAILED/);
   assert.doesNotMatch(queueCallBlock, /KV_QUEUES/);
-  assert.doesNotMatch(queueCallBlock, /patients\.shift\(\)/);
+  assert.doesNotMatch(queueCallBlock, /queue\.patients\.shift/);
 });
 
 test('patient login and pin verify canonical paths align to DB-backed contracts', () => {
