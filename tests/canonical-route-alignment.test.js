@@ -22,6 +22,7 @@ test('canonical routes are handled by api/v1.js before legacy delegation', () =>
     "if ((pathname === '/api/v1/patient/login' || pathname === '/api/v1/patients/login') && method === 'POST')",
     "if (pathname === '/api/v1/queue/enter' && method === 'POST')",
     "if (pathname === '/api/v1/queue/status' && method === 'GET')",
+    "if (pathname === '/api/v1/queue/call' && method === 'POST')",
     "if (pathname === '/api/v1/pin/verify' && method === 'POST')",
   ];
 
@@ -40,6 +41,14 @@ test('canonical queue enter uses atomic RPC and has no client-side next-number f
   assert.doesNotMatch(queueEnterBlock, /from\('queues'\)\.insert/);
 });
 
+test('canonical queue call handler is DB-backed and avoids KV or shift logic', () => {
+  const queueCallBlock = extractIfBlock(apiV1Source, "if (pathname === '/api/v1/queue/call' && method === 'POST')");
+  assert.match(queueCallBlock, /from\('queues'\)/);
+  assert.match(queueCallBlock, /update\(\{\s*status:\s*'called'/);
+  assert.doesNotMatch(queueCallBlock, /KV_QUEUES/);
+  assert.doesNotMatch(queueCallBlock, /patients\.shift\(\)/);
+});
+
 test('patient login and pin verify canonical paths align to DB-backed contracts', () => {
   const loginBlock = extractIfBlock(apiV1Source, "if ((pathname === '/api/v1/patient/login' || pathname === '/api/v1/patients/login') && method === 'POST')");
   assert.match(loginBlock, /normalizePatientIdentifier\(body\.personalId \|\| body\.patientId\)/);
@@ -55,6 +64,7 @@ test('legacy overlapping endpoint implementations are removed from lib/api-handl
     "pathname === '/api/v1/patient/login'",
     "pathname === '/api/v1/queue/enter'",
     "pathname === '/api/v1/queue/status'",
+    "pathname === '/api/v1/queue/call'",
     "pathname === '/api/v1/pin/verify'",
   ];
 

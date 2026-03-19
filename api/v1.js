@@ -215,6 +215,69 @@ export default async function handler(req, res) {
       return res.status(200).json({ success: true, data: payload });
     }
 
+    if (pathname === '/api/v1/queue/call' && method === 'POST') {
+      const clinicId = String(body.clinicId || body.clinic_id || '').trim();
+      if (!clinicId) return res.status(400).json({ success: false, error: 'Missing required field: clinicId' });
+      
+      const today = new Date().toISOString().split('T')[0];
+      
+      // 1. Close any currently active tickets for this clinic
+      await supabase
+        .from('queues')
+        .update({ status: 'completed', completed_at: new Date().toISOString() })
+        .eq('clinic_id', clinicId)
+        .eq('queue_date', today)
+        .in('status', ['called', 'serving', 'in_service', 'in_progress']);
+
+      // 2. Find the oldest waiting patient
+      const { data: nextPatient, error: findError } = await supabase
+        .from('queues')
+        .select('*')
+        .eq('clinic_id', clinicId)
+        .eq('queue_date', today)
+        .eq('status', 'waiting')
+        .order('entered_at', { ascending: true })
+        .limit(1)
+        .maybeSingle();
+
+      if (findError) throw findError;
+
+      if (!nextPatient) {
+        return res.status(200).json({
+          success: true,
+          clinicId,
+          currentNumber: 0,
+          message: 'Queue is empty'
+        });
+      }
+
+      // 3. Update patient to called
+      const { data: updated, error: updateError } = await supabase
+        .from('queues')
+        .update({ 
+          status: 'called', 
+          called_at: new Date().toISOString() 
+        })
+        .eq('id', nextPatient.id)
+        .select()
+        .single();
+
+      if (updateError) throw updateError;
+
+      return res.status(200).json({
+        success: true,
+        clinicId,
+        currentNumber: updated.display_number,
+        patient: {
+          id: updated.id,
+          position: updated.display_number,
+          patientId: updated.patient_id,
+          enteredAt: updated.entered_at,
+          calledAt: updated.called_at
+        }
+      });
+    }
+
     if (pathname === '/api/v1/qa/deep_run') {
       if (method === 'GET') {
         const { count: totalErrors } = await supabase.from('smart_errors_log').select('*', { count: 'exact', head: true });
