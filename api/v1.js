@@ -168,6 +168,7 @@ export default async function handler(req, res) {
       return res.status(200).json({ status: 'ok', ok: true, version: '3.9.2-queue-call-canonical', timestamp: new Date().toISOString() });
     }
 
+    // ==================== PATIENT LOGIN ====================
     if ((pathname === '/api/v1/patient/login' || pathname === '/api/v1/patients/login') && method === 'POST') {
       const patientId = normalizePatientIdentifier(body.personalId || body.patientId);
       if (!patientId) return res.status(400).json({ success: false, error: 'Missing required field: personalId|patientId' });
@@ -181,6 +182,7 @@ export default async function handler(req, res) {
       return res.status(200).json({ success: true, data: { patient: patientRow } });
     }
 
+    // ==================== PIN VERIFICATION ====================
     if (pathname === '/api/v1/pin/verify' && method === 'POST') {
       const clinicId = String(body.clinicId || body.clinic_id || '').trim();
       const pin = String(body.pin || '').trim();
@@ -190,7 +192,8 @@ export default async function handler(req, res) {
       return res.status(200).json({ success: true, verified: true, clinicId });
     }
 
-        if (pathname === '/api/v1/queue/enter' && method === 'POST') {
+    // ==================== QUEUE OPERATIONS ====================
+    if (pathname === '/api/v1/queue/enter' && method === 'POST') {
       const clinicId = String(body.clinicId || body.clinic_id || '').trim();
       const patientId = normalizePatientIdentifier(body.patientId || body.personalId);
       if (!clinicId || !patientId) {
@@ -399,6 +402,7 @@ export default async function handler(req, res) {
     }
 
     // ✅ إصلاح: إضافة نقطة نهاية تسجيل دخول الإدارة مباشرة لضمان استجابة JSON
+    // ==================== ADMIN LOGIN ====================
     if (pathname === '/api/v1/admin/login' && method === 'POST') {
       const { username, password } = body;
       if (!username || !password) {
