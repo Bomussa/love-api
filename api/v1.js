@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 import delegatedV1Handler from '../lib/api-handlers.js';
 import { createAdminToken, verifyAdminBearerToken, hasValidAdminSecret, verifyAdminPassword } from '../lib/admin-auth.js';
+import { handleAdminReports, handleAdminUsers, handleActivityLog, handleNotifications } from './admin-endpoints.js';
 
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY || process.env.SUPABASE_ANON_KEY;
@@ -442,6 +443,26 @@ export default async function handler(req, res) {
       });
     }
 
+    // ==================== ADMIN REPORTS ====================
+    if (pathname.startsWith('/api/v1/admin/reports')) {
+      return await handleAdminReports(req, res, { supabase, ADMIN_AUTH_SECRET });
+    }
+
+    // ==================== ADMIN USERS ====================
+    if (pathname.startsWith('/api/v1/admin/users')) {
+      return await handleAdminUsers(req, res, { supabase, ADMIN_AUTH_SECRET });
+    }
+
+    // ==================== ACTIVITY LOG ====================
+    if (pathname.startsWith('/api/v1/admin/activity-log')) {
+      return await handleActivityLog(req, res, { supabase, ADMIN_AUTH_SECRET });
+    }
+
+    // ==================== NOTIFICATIONS ====================
+    if (pathname.startsWith('/api/v1/admin/notifications')) {
+      return await handleNotifications(req, res, { supabase, ADMIN_AUTH_SECRET });
+    }
+
     return await delegatedV1Handler(req, res, { supabase, ADMIN_AUTH_SECRET });
   } catch (err) {
     console.error('V1 API Error:', err);
@@ -455,4 +476,19 @@ export default async function handler(req, res) {
       });
     }
   }
+}
+
+// ==================== DASHBOARD ENDPOINTS ====================
+import { handleDashboardStats, handleClinicStats, handleServiceHealth } from './dashboard-endpoints.js';
+
+if (pathname === '/api/v1/dashboard/stats' && method === 'GET') {
+  return await handleDashboardStats(req, res, { supabase });
+}
+
+if (pathname === '/api/v1/dashboard/clinic-stats' && method === 'GET') {
+  return await handleClinicStats(req, res, { supabase });
+}
+
+if (pathname === '/api/v1/dashboard/health' && method === 'GET') {
+  return await handleServiceHealth(req, res, { supabase });
 }
