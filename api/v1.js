@@ -406,6 +406,8 @@ export default async function handler(req, res) {
     // ==================== ADMIN LOGIN ====================
     if (pathname === '/api/v1/admin/login' && method === 'POST') {
       const { username, password } = body;
+      console.log('[DEBUG] Admin login attempt:', { username, passwordLength: password?.length });
+
       if (!username || !password) {
         return res.status(400).json({ success: false, error: 'MISSING_CREDENTIALS', message: 'اسم المستخدم وكلمة المرور مطلوبة' });
       }
@@ -416,11 +418,16 @@ export default async function handler(req, res) {
         .eq('username', username)
         .maybeSingle();
 
+      console.log('[DEBUG] Admin query result:', { adminFound: !!admin, adminError, passwordHashLength: admin?.password_hash?.length });
+
       if (adminError) {
         return res.status(500).json({ success: false, error: 'DB_ERROR', message: 'خطأ في قاعدة البيانات أثناء المصادقة' });
       }
 
-      if (!admin || !verifyAdminPassword(password, admin.password_hash)) {
+      const passwordValid = verifyAdminPassword(password, admin?.password_hash);
+      console.log('[DEBUG] Password verification:', { passwordValid });
+
+      if (!admin || !passwordValid) {
         return res.status(401).json({ success: false, error: 'INVALID_CREDENTIALS', message: 'اسم المستخدم أو كلمة المرور غير صحيحة' });
       }
 
