@@ -404,6 +404,10 @@ export default async function handler(req, res) {
 
     // ✅ إصلاح: إضافة نقطة نهاية تسجيل دخول الإدارة مباشرة لضمان استجابة JSON
     // ==================== ADMIN LOGIN ====================
+    if (pathname === '/api/v1/test' && method === 'GET') {
+      return res.status(200).json({ success: true, message: 'Test endpoint working', pathname, method });
+    }
+
     if (pathname === '/api/v1/test-password' && method === 'POST') {
       return res.status(200).json({ success: true, message: 'Test endpoint working' });
     }
