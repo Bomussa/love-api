@@ -405,28 +405,7 @@ export default async function handler(req, res) {
     // ✅ إصلاح: إضافة نقطة نهاية تسجيل دخول الإدارة مباشرة لضمان استجابة JSON
     // ==================== ADMIN LOGIN ====================
     if (pathname === '/api/v1/test-password' && method === 'POST') {
-      const { password, hash } = body;
-      try {
-        const crypto = await import('node:crypto');
-        const derivedHash = crypto.createHash('sha256').update(password).digest('hex');
-        const passwordBytes = Buffer.from(hash, 'hex');
-        const derivedBytes = Buffer.from(derivedHash, 'hex');
-        const isValid = passwordBytes.length === derivedBytes.length && 
-                       crypto.timingSafeEqual(passwordBytes, derivedBytes);
-        return res.status(200).json({ 
-          success: true, 
-          password, 
-          hash, 
-          derivedHash, 
-          hashLength: hash?.length,
-          derivedHashLength: derivedHash?.length,
-          passwordBytesLength: passwordBytes?.length,
-          derivedBytesLength: derivedBytes?.length,
-          isValid 
-        });
-      } catch (e) {
-        return res.status(500).json({ success: false, error: e.message });
-      }
+      return res.status(200).json({ success: true, message: 'Test endpoint working' });
     }
 
     if (pathname === '/api/v1/admin/login' && method === 'POST') {
