@@ -2,21 +2,50 @@
   "version": 2,
   "installCommand": "pnpm install --no-frozen-lockfile",
   "buildCommand": "npm install",
+  "functions": {
+    "api/*.js": {
+      "maxDuration": 30
+    }
+  },
   "headers": [
     {
       "source": "/api/(.*)",
       "headers": [
-        { "key": "Access-Control-Allow-Methods", "value": "GET, POST, PUT, PATCH, DELETE, OPTIONS" },
-        { "key": "Access-Control-Allow-Headers", "value": "Content-Type, Authorization, X-Admin-Secret" },
-        { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
+        {
+          "key": "Access-Control-Allow-Methods",
+          "value": "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+        },
+        {
+          "key": "Access-Control-Allow-Headers",
+          "value": "Content-Type, Authorization, X-Admin-Secret"
+        },
+        {
+          "key": "Cache-Control",
+          "value": "no-cache, no-store, must-revalidate"
+        }
       ]
     }
   ],
   "rewrites": [
-    { "source": "/api/health", "destination": "/api/health.js" },
-    { "source": "/api/v1/health", "destination": "/api/v1.js" },
-    { "source": "/api/v1/status", "destination": "/api/v1.js" },
-    { "source": "/api/v1/qa/deep_run", "destination": "/api/v1.js" },
-    { "source": "/api/v1/(.*)", "destination": "/api/v1.js" }
+    {
+      "source": "/api/health",
+      "destination": "/api/health.js"
+    },
+    {
+      "source": "/api/v1/health",
+      "destination": "/api/v1.js"
+    },
+    {
+      "source": "/api/v1/status",
+      "destination": "/api/v1.js"
+    },
+    {
+      "source": "/api/v1/qa/deep_run",
+      "destination": "/api/v1.js"
+    },
+    {
+      "source": "/api/v1/(.*)",
+      "destination": "/api/v1.js"
+    }
   ]
 }
