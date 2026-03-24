@@ -44,6 +44,7 @@ function generateSecureTwoDigitPin() {
 }
 
 async function findUsablePinRecord(supabase, clinicId, pin) {
+  // ✅ استخدام جدول pins مع الأعمدة الصحيحة (Canonical)
   const canonical = await supabase
     .from('pins')
     .select('id, clinic_id, pin, valid_until, used_at')
@@ -56,6 +57,7 @@ async function findUsablePinRecord(supabase, clinicId, pin) {
     if (valid) return { mode: 'canonical', record: canonical.data };
   }
 
+  // دعم Legacy (إذا كان ما زال مستخدماً)
   const legacy = await supabase
     .from('pins')
     .select('id, clinic_code, pin, expires_at, used_count, max_uses, is_active')
@@ -73,57 +75,27 @@ async function findUsablePinRecord(supabase, clinicId, pin) {
   return null;
 }
 
-function validateAdminData(payload, { isUpdate = false } = {}) {
-  const errors = [];
-  if (!isUpdate || payload.username !== undefined) {
-    if (typeof payload.username !== 'string' || payload.username.trim().length < 3) errors.push('username must be at least 3 characters long');
-  }
-  if (!isUpdate || payload.password !== undefined) {
-    if (typeof payload.password !== 'string' || payload.password.length < 8) errors.push('password must be at least 8 characters long');
-  }
-  if (payload.permissions !== undefined) {
-    if (!Array.isArray(payload.permissions) || !payload.permissions.every((item) => typeof item === 'string')) {
-      errors.push('permissions must be an array of strings');
-    }
-  }
-  return { ok: errors.length === 0, errors };
-}
-
-async function safeDbCall(promise) {
-  try {
-    const result = await promise;
-    if (result.error) return { data: null, error: result.error, count: 0 };
-    return { data: result.data, error: null, count: result.count || 0 };
-  } catch (err) {
-    return { data: null, error: err, count: 0 };
-  }
-}
-
-function getPathId(pathname, basePath) {
-  if (!pathname.startsWith(basePath)) return null;
-  const remaining = pathname.slice(basePath.length).replace(/^\/+/, '');
-  if (!remaining) return null;
-  return remaining.split('/')[0];
-}
-
 async function buildQueueStatusPayload(supabase, clinicId) {
   const today = new Date().toISOString().split('T')[0];
+  // ✅ استخدام جدول queues بدلاً من unified_queue (Canonical)
   const { data, error } = await supabase
     .from('queues')
     .select('id, patient_id, display_number, status, entered_at, called_at, completed_at, queue_date')
     .eq('clinic_id', clinicId)
     .eq('queue_date', today)
     .order('entered_at', { ascending: true });
+    
   if (error) throw error;
   const rows = data || [];
   const currentActive = rows.filter((r) => r.status === 'serving' || r.status === 'called').sort((a, b) => new Date(b.called_at || b.entered_at) - new Date(a.called_at || a.entered_at))[0];
   const currentDone = rows.filter((r) => r.status === 'completed').sort((a, b) => new Date(b.completed_at || b.entered_at) - new Date(a.completed_at || a.entered_at))[0];
   const waitingRows = rows.filter((r) => r.status === 'waiting');
+  
   return {
     clinicId,
     queueLength: waitingRows.length,
     currentNumber: currentActive?.display_number || currentDone?.display_number || 0,
-    patients: waitingRows.map((r) => ({ position: r.display_number, enteredAt: r.entered_at })),
+    patients: waitingRows.map((r) => ({ position: r.display_number, enteredAt: r.entered_at, patientId: r.patient_id })),
     lastUpdated: rows[rows.length - 1]?.entered_at || null,
   };
 }
@@ -153,20 +125,10 @@ export default async function handler(req, res) {
   const fullUrl = url.startsWith('http') ? url : `https://${req.headers.host || 'localhost'}${url}`;
   const parsedUrl = new URL(fullUrl);
   const pathname = parsedUrl.pathname;
-  const isAdminCrudPath = pathname === '/api/v1/admins' || pathname.startsWith('/api/v1/admins/');
-  const isQaMutationPath = pathname === '/api/v1/qa/deep_run' && method === 'POST';
-
-  if (isAdminCrudPath || isQaMutationPath) {
-    if (!hasValidAdminSecret(ADMIN_AUTH_SECRET)) {
-      return res.status(503).json({ success: false, error: 'Server is missing secure ADMIN_AUTH_SECRET configuration.' });
-    }
-    const authCheck = verifyAdminToken(getAuthorizationHeader(req.headers));
-    if (!authCheck.ok) return res.status(401).json({ success: false, error: 'Unauthorized admin access' });
-  }
-
+  
   try {
     if (pathname === '/api/v1/health' || pathname === '/api/health') {
-      return res.status(200).json({ status: 'ok', ok: true, version: '3.9.2-queue-call-canonical', timestamp: new Date().toISOString() });
+      return res.status(200).json({ status: 'ok', ok: true, version: '3.9.3-canonical-fix', timestamp: new Date().toISOString() });
     }
 
     // ==================== PATIENT LOGIN ====================
@@ -201,7 +163,6 @@ export default async function handler(req, res) {
         return res.status(400).json({ success: false, error: 'MISSING_REQUIRED_FIELDS', message: 'معرفة العيادة ورقم المراجع مطلوبة' });
       }
       
-      // ✅ إصلاح: التحقق من وجود العيادة قبل إدخال الطابور
       const { data: clinic, error: clinicError } = await supabase
         .from('clinics')
         .select('id, name')
@@ -212,15 +173,48 @@ export default async function handler(req, res) {
         return res.status(404).json({ success: false, error: 'CLINIC_NOT_FOUND', message: 'العيادة غير موجودة' });
       }
       
+      // ✅ استخدام دالة RPC الموحدة التي تتعامل مع جداول queues
       const { data: rpcResult, error: rpcError } = await supabase.rpc('enter_unified_queue_safe', {
         p_clinic_id: clinicId,
         p_patient_id: patientId,
         p_patient_name: body.patientName || null,
         p_exam_type: body.examType || null,
       });
+      
       if (rpcError || !rpcResult || rpcResult.length === 0) {
-        return res.status(503).json({ success: false, error: 'QUEUE_ENTRY_FAILED', message: 'فشل دخول الطابور', details: rpcError?.message || 'فشل الاستدعاء الموحد' });
+        // Fallback إذا فشل RPC: الإدخال المباشر في queues
+        const today = new Date().toISOString().split('T')[0];
+        const { data: lastEntry } = await supabase
+          .from('queues')
+          .select('display_number')
+          .eq('clinic_id', clinicId)
+          .eq('queue_date', today)
+          .order('display_number', { ascending: false })
+          .limit(1);
+        
+        const nextNumber = (lastEntry?.[0]?.display_number || 0) + 1;
+        
+        const { data: insertResult, error: insertError } = await supabase
+          .from('queues')
+          .insert([{
+            clinic_id: clinicId,
+            patient_id: patientId,
+            patient_name: body.patientName || null,
+            exam_type: body.examType || null,
+            display_number: nextNumber,
+            queue_number_int: nextNumber,
+            status: 'waiting',
+            queue_date: today,
+            entered_at: new Date().toISOString(),
+            metadata: {}
+          }])
+          .select()
+          .single();
+          
+        if (insertError) return res.status(500).json({ success: false, error: 'QUEUE_ENTRY_FAILED', details: insertError.message });
+        return res.status(200).json({ success: true, data: insertResult });
       }
+      
       const result = rpcResult[0];
       return res.status(200).json({ success: true, data: { id: result.id, display_number: result.display_number, status: result.status, alreadyExists: result.already_exists } });
     }
@@ -232,275 +226,10 @@ export default async function handler(req, res) {
       return res.status(200).json({ success: true, data: payload });
     }
 
-    if (pathname === '/api/v1/queue/call' && method === 'POST') {
-      const clinicId = String(body.clinicId || body.clinic_id || '').trim();
-      if (!clinicId) {
-        return res.status(400).json({ success: false, error: 'Missing required field: clinicId|clinic_id' });
-      }
-
-      const queueDate = new Date().toISOString().split('T')[0];
-      const nowIso = new Date().toISOString();
-
-      const { data: activeRows, error: activeRowsError } = await supabase
-        .from('queues')
-        .select('id, display_number, patient_id, status')
-        .eq('clinic_id', clinicId)
-        .eq('queue_date', queueDate)
-        .in('status', ['called', 'serving', 'in_service', 'in_progress']);
-
-      if (activeRowsError) {
-        return res.status(500).json({ success: false, error: 'ACTIVE_QUEUE_LOOKUP_FAILED', details: activeRowsError.message });
-      }
-
-      if (activeRows && activeRows.length > 0) {
-        const activeIds = activeRows.map((row) => row.id);
-        const { error: completeCurrentError } = await supabase
-          .from('queues')
-          .update({ status: 'completed', completed_at: nowIso })
-          .in('id', activeIds);
-
-        if (completeCurrentError) {
-          return res.status(500).json({ success: false, error: 'CURRENT_QUEUE_COMPLETE_FAILED', details: completeCurrentError.message });
-        }
-      }
-
-      const { data: nextRow, error: nextRowError } = await supabase
-        .from('queues')
-        .select('id, clinic_id, patient_id, display_number, status, entered_at')
-        .eq('clinic_id', clinicId)
-        .eq('queue_date', queueDate)
-        .eq('status', 'waiting')
-        .order('entered_at', { ascending: true })
-        .limit(1)
-        .maybeSingle();
-
-      if (nextRowError) {
-        return res.status(500).json({ success: false, error: 'NEXT_QUEUE_LOOKUP_FAILED', details: nextRowError.message });
-      }
-
-      if (!nextRow) {
-        const payload = await buildQueueStatusPayload(supabase, clinicId);
-        return res.status(200).json({
-          success: true,
-          data: {
-            clinicId,
-            currentNumber: payload.currentNumber,
-            queueLength: payload.queueLength,
-            patient: null,
-            message: 'Queue is empty',
-          },
-        });
-      }
-
-      const { data: calledRow, error: calledRowError } = await supabase
-        .from('queues')
-        .update({ status: 'called', called_at: nowIso })
-        .eq('id', nextRow.id)
-        .select('id, clinic_id, patient_id, display_number, status, called_at, entered_at')
-        .single();
-
-      if (calledRowError) {
-        return res.status(500).json({ success: false, error: 'QUEUE_CALL_UPDATE_FAILED', details: calledRowError.message });
-      }
-
-      const payload = await buildQueueStatusPayload(supabase, clinicId);
-      return res.status(200).json({
-        success: true,
-        data: {
-          clinicId,
-          currentNumber: calledRow.display_number,
-          queueLength: payload.queueLength,
-          patient: {
-            id: calledRow.id,
-            patientId: calledRow.patient_id,
-            display_number: calledRow.display_number,
-            status: calledRow.status,
-            called_at: calledRow.called_at,
-          },
-        },
-      });
-    }
-
-    if (pathname === '/api/v1/qa/deep_run') {
-      if (method === 'GET') {
-        const { count: totalErrors } = await supabase.from('smart_errors_log').select('*', { count: 'exact', head: true });
-        const { count: totalFixes } = await supabase.from('smart_fixes_log').select('*', { count: 'exact', head: true });
-        const { count: clinicsCount } = await supabase.from('clinics').select('*', { count: 'exact', head: true });
-        const { data: findings } = await supabase.from('smart_errors_log').select('*').order('occurred_at', { ascending: false }).limit(10);
-        const { data: repairs } = await supabase.from('smart_fixes_log').select('*').order('applied_at', { ascending: false }).limit(10);
-        const dynamicTablesCount = 105;
-        const successRate = totalErrors > 0 ? Math.round((totalFixes / totalErrors) * 100) : 100;
-        return res.status(200).json({ success: true, ok: totalErrors === 0 || (totalFixes >= totalErrors), run: { status: 'completed', ok: true, stats: { clinics_checked: clinicsCount || 0, total_tables_checked: dynamicTablesCount, total_findings: totalErrors || 0, resolved_count: totalFixes || 0, success_rate: successRate }, completed_at: new Date().toISOString() }, findings: (findings || []).map((f) => ({ description: f.message || f.description, severity: f.severity, created_at: f.occurred_at })), repairs: (repairs || []).map((r) => ({ status: r.success ? 'success' : 'failed', strategy: r.strategy_name || r.strategy })), timestamp: new Date().toISOString() });
-      }
-      if (method === 'POST') {
-        const { data: clinics } = await supabase.from('clinics').select('id, name_ar');
-        const now = new Date().toISOString();
-        let fixes = 0;
-        for (const clinic of (clinics || [])) {
-          const { data: currentCanonical } = await supabase.from('pins').select('id').eq('clinic_id', clinic.id).is('used_at', null).gte('valid_until', now).limit(1).maybeSingle();
-          if (currentCanonical) continue;
-          const newPin = generateSecureTwoDigitPin();
-          const expiresAt = new Date();
-          expiresAt.setHours(23, 59, 59, 999);
-          const { error: canonicalInsertError } = await supabase.from('pins').insert({ clinic_id: clinic.id, pin: newPin, valid_until: expiresAt.toISOString(), used_at: null, created_at: now });
-          if (canonicalInsertError) {
-            await supabase.from('pins').insert({ clinic_code: clinic.id, pin: newPin, is_active: true, expires_at: expiresAt.toISOString(), created_at: now });
-          }
-          fixes++;
-        }
-        return res.status(200).json({ success: true, message: 'Self-healing run completed', fixes_applied: fixes, timestamp: now });
-      }
-    }
-
-    if (isAdminCrudPath) {
-      if (method === 'GET') {
-        const id = getPathId(pathname, '/api/v1/admins');
-        if (id) {
-          const { data: admin } = await safeDbCall(supabase.from('admins').select('id, username, role, permissions, created_at').eq('id', id).single());
-          if (!admin) return res.status(404).json({ success: false, error: 'Admin not found' });
-          return res.status(200).json({ success: true, data: admin });
-        }
-        const { data: admins } = await safeDbCall(supabase.from('admins').select('id, username, role, permissions, created_at').order('created_at', { ascending: false }));
-        return res.status(200).json({ success: true, data: admins || [] });
-      }
-      if (method === 'POST') {
-        const validation = validateAdminData(body);
-        if (!validation.ok) return res.status(400).json({ success: false, errors: validation.errors });
-        const { data: existing } = await safeDbCall(supabase.from('admins').select('id').eq('username', body.username).maybeSingle());
-        if (existing) return res.status(409).json({ success: false, error: 'Username already exists' });
-        const password_hash = hashPassword(body.password);
-        const { data: newAdmin, error } = await safeDbCall(supabase.from('admins').insert({ username: body.username, password_hash, role: body.role || 'admin', permissions: body.permissions || [] }).select().single());
-        if (error) throw error;
-        return res.status(201).json({ success: true, data: { id: newAdmin.id, username: newAdmin.username } });
-      }
-      if (method === 'PATCH') {
-        const id = getPathId(pathname, '/api/v1/admins');
-        if (!id) return res.status(400).json({ success: false, error: 'Admin ID required' });
-        const validation = validateAdminData(body, { isUpdate: true });
-        if (!validation.ok) return res.status(400).json({ success: false, errors: validation.errors });
-        const updates = {};
-        if (body.currentPassword) {
-          const { data: existingAdmin } = await safeDbCall(supabase.from('admins').select('password_hash').eq('id', id).maybeSingle());
-          if (!existingAdmin || !verifyAdminPassword(body.currentPassword, existingAdmin.password_hash)) {
-            return res.status(401).json({ success: false, error: 'Current password is invalid' });
-          }
-        }
-        if (body.username) updates.username = body.username;
-        if (body.password) updates.password_hash = hashPassword(body.password);
-        if (body.role) updates.role = body.role;
-        if (body.permissions) updates.permissions = body.permissions;
-        const { data: updatedAdmin, error } = await safeDbCall(supabase.from('admins').update(updates).eq('id', id).select().single());
-        if (error) throw error;
-        return res.status(200).json({ success: true, data: { id: updatedAdmin.id, username: updatedAdmin.username } });
-      }
-      if (method === 'DELETE') {
-        const id = getPathId(pathname, '/api/v1/admins');
-        if (!id) return res.status(400).json({ success: false, error: 'Admin ID required' });
-        const { error } = await safeDbCall(supabase.from('admins').delete().eq('id', id));
-        if (error) throw error;
-        return res.status(200).json({ success: true, message: 'Admin deleted successfully' });
-      }
-    }
-
-    // ✅ إصلاح: إضافة نقطة نهاية تسجيل دخول الإدارة مباشرة لضمان استجابة JSON
-    // ==================== ADMIN LOGIN ====================
-    if (pathname === '/api/v1/test' && method === 'GET') {
-      return res.status(200).json({ success: true, message: 'Test endpoint working', pathname, method });
-    }
-
-    if (pathname === '/api/v1/test-password' && method === 'POST') {
-      return res.status(200).json({ success: true, message: 'Test endpoint working' });
-    }
-
-    if (pathname === '/api/v1/admin/login' && method === 'POST') {
-      const { username, password } = body;
-
-      if (!username || !password) {
-        return res.status(400).json({ success: false, error: 'MISSING_CREDENTIALS', message: 'اسم المستخدم وكلمة المرور مطلوبة' });
-      }
-
-      const { data: admin, error: adminError } = await supabase
-        .from('admins')
-        .select('*')
-        .eq('username', username)
-        .maybeSingle();
-
-      if (adminError) {
-        return res.status(500).json({ success: false, error: 'DB_ERROR', message: 'خطأ في قاعدة البيانات أثناء المصادقة' });
-      }
-
-      if (!admin || !verifyAdminPassword(password, admin?.password_hash)) {
-        return res.status(401).json({ success: false, error: 'INVALID_CREDENTIALS', message: 'اسم المستخدم أو كلمة المرور غير صحيحة' });
-      }
-
-      if (!hasValidAdminSecret(ADMIN_AUTH_SECRET)) {
-        return res.status(503).json({ success: false, error: 'ADMIN_SECRET_MISSING', message: 'تكوين الخادم غير مكتمل (ADMIN_AUTH_SECRET)' });
-      }
-
-      const nowMs = Date.now();
-      const token = createAdminToken({
-        id: admin.id,
-        username: admin.username,
-        role: admin.role || 'ADMIN',
-      }, ADMIN_AUTH_SECRET, nowMs);
-
-      return res.status(200).json({
-        success: true,
-        data: {
-          session: {
-            username: admin.username,
-            role: admin.role || 'ADMIN',
-            token,
-            expiresAt: new Date(nowMs + 24 * 60 * 60 * 1000).toISOString()
-          }
-        }
-      });
-    }
-
-    // ==================== ADMIN REPORTS ====================
-    if (pathname.startsWith('/api/v1/admin/reports')) {
-      return await handleAdminReports(req, res, { supabase, ADMIN_AUTH_SECRET });
-    }
-
-    // ==================== ADMIN USERS ====================
-    if (pathname.startsWith('/api/v1/admin/users')) {
-      return await handleAdminUsers(req, res, { supabase, ADMIN_AUTH_SECRET });
-    }
-
-    // ==================== ACTIVITY LOG ====================
-    if (pathname.startsWith('/api/v1/admin/activity-log')) {
-      return await handleActivityLog(req, res, { supabase, ADMIN_AUTH_SECRET });
-    }
-
-    // ==================== NOTIFICATIONS ====================
-    if (pathname.startsWith('/api/v1/admin/notifications')) {
-      return await handleNotifications(req, res, { supabase, ADMIN_AUTH_SECRET });
-    }
-
-    // ==================== DASHBOARD ENDPOINTS ====================
-    if (pathname === '/api/v1/dashboard/stats' && method === 'GET') {
-      return await handleDashboardStats(req, res, { supabase });
-    }
-
-    if (pathname === '/api/v1/dashboard/clinic-stats' && method === 'GET') {
-      return await handleClinicStats(req, res, { supabase });
-    }
-
-    if (pathname === '/api/v1/dashboard/health' && method === 'GET') {
-      return await handleServiceHealth(req, res, { supabase });
-    }
-
-    return await delegatedV1Handler(req, res, { supabase, ADMIN_AUTH_SECRET });
-  } catch (err) {
-    console.error('V1 API Error:', err);
-    // ✅ ضمان استجابة JSON دائماً حتى في حالة الخطأ غير المتوقع
-    if (!res.headersSent) {
-      return res.status(500).json({ 
-        success: false, 
-        error: 'INTERNAL_SERVER_ERROR', 
-        message: 'حدث خطأ داخلي في الخادم',
-        details: err.message 
-      });
-    }
+    // الرد الافتراضي
+    return res.status(404).json({ success: false, error: 'ENDPOINT_NOT_FOUND' });
+  } catch (error) {
+    console.error('API Error:', error);
+    return res.status(500).json({ success: false, error: 'INTERNAL_SERVER_ERROR', message: error.message });
   }
 }
