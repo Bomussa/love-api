@@ -17,10 +17,13 @@ serve(async (req: Request) => {
             throw new Error('Method not allowed');
         }
 
-        const { militaryId, name, examType } = await req.json();
+        const { militaryId, personalId, name, examType } = await req.json();
+        
+        // Accept both militaryId and personalId for compatibility
+        const patientId = militaryId || personalId;
 
-        if (!militaryId || !name) {
-            throw new Error('Military ID and name are required');
+        if (!patientId || !name) {
+            throw new Error('Patient ID and name are required');
         }
 
         // Create Supabase client
@@ -32,7 +35,7 @@ serve(async (req: Request) => {
         const { data: existingPatient, error: fetchError } = await supabase
             .from('patients')
             .select('*')
-            .eq('military_id', militaryId)
+            .eq('military_id', patientId)
             .single();
 
         let patient;
