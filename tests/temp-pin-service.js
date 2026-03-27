@@ -4,11 +4,11 @@
  * Valid from 05:00 AM to 12:00 AM (Midnight)
  */
 
-export const generatePinCode = (min = 2, max = 99) => {
+const generatePinCode = (min = 2, max = 99) => {
   return String(Math.floor(Math.random() * (max - min + 1)) + min);
 };
 
-export const getServiceDayBoundaries = () => {
+const getServiceDayBoundaries = () => {
   const now = new Date();
   // Service day starts at 05:00 AM
   const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 5, 0, 0, 0);
@@ -20,7 +20,7 @@ export const getServiceDayBoundaries = () => {
   return { start, end };
 };
 
-export const getTodayDateKey = () => {
+const getTodayDateKey = () => {
   const { start } = getServiceDayBoundaries();
   const now = new Date();
   
@@ -33,13 +33,13 @@ export const getTodayDateKey = () => {
   return now.toISOString().split('T')[0];
 };
 
-export const isWithinServiceHours = () => {
+const isWithinServiceHours = () => {
   const now = new Date();
   const { start, end } = getServiceDayBoundaries();
   return now >= start && now <= end;
 };
 
-export const findLatestValidPin = async (db, clinicId, pin = null) => {
+const findLatestValidPin = async (db, clinicId, pin = null) => {
   const now = new Date();
   const { start, end } = getServiceDayBoundaries();
   
@@ -66,7 +66,7 @@ export const findLatestValidPin = async (db, clinicId, pin = null) => {
   return data ?? null;
 };
 
-export const generateDailyPin = async (db, clinicId) => {
+const generateDailyPin = async (db, clinicId) => {
   if (!isWithinServiceHours()) {
     throw new Error('OUT_OF_SERVICE_HOURS');
   }
@@ -100,7 +100,7 @@ export const generateDailyPin = async (db, clinicId) => {
   return { pinRecord: data, isExisting: false };
 };
 
-export const verifyPin = async (db, clinicId, pin) => {
+const verifyPin = async (db, clinicId, pin) => {
   if (!isWithinServiceHours()) {
     return { valid: false, error: 'OUT_OF_SERVICE_HOURS' };
   }
@@ -126,7 +126,7 @@ export const verifyPin = async (db, clinicId, pin) => {
   return { valid: true, pinRecord };
 };
 
-export const getPinStatus = async (db, clinicId) => {
+const getPinStatus = async (db, clinicId) => {
   const pinRecord = await findLatestValidPin(db, clinicId);
 
   if (!pinRecord) {
@@ -136,7 +136,9 @@ export const getPinStatus = async (db, clinicId) => {
   return { hasActivePin: true, pinRecord };
 };
 
-export const assertPinValidForQueueAction = async (db, clinicId, pin) => {
+const assertPinValidForQueueAction = async (db, clinicId, pin) => {
   const pinRecord = await findLatestValidPin(db, clinicId, pin);
   return !!pinRecord;
 };
+
+module.exports = { generatePinCode, getServiceDayBoundaries, isWithinServiceHours };
