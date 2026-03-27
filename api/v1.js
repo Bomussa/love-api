@@ -145,13 +145,45 @@ export default async function handler(req, res) {
       return res.status(200).json({ success: true, data: { patient: patientRow } });
     }
 
-    // ==================== PIN VERIFICATION ====================
+    // ==================== PIN VERIFICATION & QUEUE COMPLETION ====================
     if (pathname === '/api/v1/pin/verify' && method === 'POST') {
       const clinicId = String(body.clinicId || body.clinic_id || '').trim();
       const pin = String(body.pin || '').trim();
+      const patientId = String(body.patientId || '').trim();
+      const action = body.action; // 'complete' or null
+
       if (!clinicId || !pin) return res.status(400).json({ success: false, error: 'Missing required fields: clinicId, pin' });
+      
       const pinMatch = await findUsablePinRecord(supabase, clinicId, pin);
       if (!pinMatch) return res.status(401).json({ success: false, error: 'INVALID_PIN' });
+
+      // If action is complete, also update the queue status
+      if (action === 'complete' && patientId) {
+        const nowIso = new Date().toISOString();
+        const { error: queueError } = await supabase
+          .from('queues')
+          .update({
+            status: 'completed',
+            completed_at: nowIso,
+            completed_by_pin: pin
+          })
+          .eq('clinic_id', clinicId)
+          .eq('patient_id', patientId)
+          .in('status', ['waiting', 'called', 'serving']);
+
+        if (queueError) return res.status(500).json({ success: false, error: 'QUEUE_COMPLETE_FAILED', details: queueError.message });
+
+        // Mark PIN as used
+        if (pinMatch.mode === 'canonical') {
+          await supabase.from('pins').update({ used_at: nowIso }).eq('id', pinMatch.record.id);
+        } else {
+          await supabase.from('pins').update({ 
+            used_count: (pinMatch.record.used_count || 0) + 1,
+            last_used_at: nowIso 
+          }).eq('id', pinMatch.record.id);
+        }
+      }
+
       return res.status(200).json({ success: true, verified: true, clinicId });
     }
 
@@ -224,6 +256,60 @@ export default async function handler(req, res) {
       if (!clinicId) return res.status(400).json({ success: false, error: 'MISSING_CLINIC_ID' });
       const payload = await buildQueueStatusPayload(supabase, clinicId);
       return res.status(200).json({ success: true, data: payload });
+    }
+
+    // ==================== CLINICS & SETTINGS ====================
+    if (pathname === '/api/v1/clinics' && method === 'GET') {
+      const { data, error } = await supabase.from('clinics').select('*').order('name_ar', { ascending: true });
+      if (error) return res.status(500).json({ success: false, error: 'FETCH_CLINICS_FAILED', details: error.message });
+      return res.status(200).json({ success: true, data });
+    }
+
+    if (pathname === '/api/v1/settings' && method === 'GET') {
+      const { data, error } = await supabase.from('settings').select('*');
+      if (error) return res.status(500).json({ success: false, error: 'FETCH_SETTINGS_FAILED', details: error.message });
+      const settingsMap = {};
+      data.forEach(s => { settingsMap[s.key] = s.value; });
+      return res.status(200).json({ success: true, data: settingsMap });
+    }
+
+    // ==================== ADMIN OPERATIONS ====================
+    if (pathname === '/api/v1/admin/login' && method === 'POST') {
+      const { username, password } = body;
+      if (!username || !password) return res.status(400).json({ success: false, error: 'MISSING_CREDENTIALS' });
+      
+      const { data: admin, error: adminError } = await supabase.from('admins').select('*').eq('username', username).maybeSingle();
+      if (adminError) return res.status(500).json({ success: false, error: 'DB_ERROR' });
+      
+      const loginStatus = verifyAdminPassword(password, admin?.password_hash);
+      if (!loginStatus) return res.status(401).json({ success: false, error: 'INVALID_CREDENTIALS' });
+      
+      const nowMs = Date.now();
+      const token = createAdminToken({ id: admin.id, username, role: admin.role }, ADMIN_AUTH_SECRET, nowMs);
+      
+      return res.status(200).json({ 
+        success: true, 
+        data: { 
+          token, 
+          role: admin.role, 
+          username,
+          expiresAt: new Date(nowMs + 24 * 60 * 60 * 1000).toISOString()
+        } 
+      });
+    }
+
+    if (pathname.startsWith('/api/v1/admin/')) {
+      const authHeader = getAuthorizationHeader(req.headers);
+      if (!verifyAdminBearerToken(authHeader, ADMIN_AUTH_SECRET)) {
+        return res.status(401).json({ success: false, error: 'UNAUTHORIZED_ADMIN' });
+      }
+
+      if (pathname === '/api/v1/admin/dashboard/stats' && method === 'GET') {
+        return handleDashboardStats(req, res, { supabase });
+      }
+      if (pathname === '/api/v1/admin/reports/daily' && method === 'GET') {
+        return handleAdminReports(req, res, { supabase, ADMIN_AUTH_SECRET });
+      }
     }
 
     // الرد الافتراضي
