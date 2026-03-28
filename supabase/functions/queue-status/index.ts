@@ -13,11 +13,20 @@ const corsHeaders = {
 };
 
 serve(async (req: Request) => {
+  // Fix 71: Always return JSON headers
+  const responseHeaders = {
+    'content-type': 'application/json',
+    ...corsHeaders,
+  };
+
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
+    // Fix 73: Internal logging for tracking
+    console.log(`[QueueStatus] Request received: ${req.url}`);
+
     const db = createClient(SUPABASE_URL, SERVICE_KEY);
     const { searchParams } = new URL(req.url);
     const clinic_id = searchParams.get('clinic_id') || searchParams.get('clinicId');
@@ -25,7 +34,7 @@ serve(async (req: Request) => {
     if (!clinic_id) {
       return new Response(
         JSON.stringify({ success: false, error: 'clinic_id parameter required' }),
-        { status: 400, headers: { 'content-type': 'application/json', ...corsHeaders } },
+        { status: 400, headers: responseHeaders },
       );
     }
 
@@ -36,7 +45,10 @@ serve(async (req: Request) => {
       .in('status', ['waiting', 'called', 'in_service'])
       .order('queue_number_int', { ascending: true, nullsFirst: false });
 
-    if (error) throw error;
+    if (error) {
+      console.error(`[QueueStatus] Database error: ${error.message}`);
+      throw error;
+    }
 
     const normalized = (queueRows ?? []).map((row: any) => ({
       id: row.id,
@@ -50,6 +62,7 @@ serve(async (req: Request) => {
     const serving = normalized.find((q) => q.status === 'in_service' || q.status === 'called');
     const waiting = normalized.filter((q) => q.status === 'waiting');
 
+    // Fix 71: Return standardized JSON response
     return new Response(
       JSON.stringify({
         success: true,
@@ -64,12 +77,18 @@ serve(async (req: Request) => {
           })),
         },
       }),
-      { headers: { 'content-type': 'application/json', ...corsHeaders } },
+      { headers: responseHeaders },
     );
   } catch (err) {
+    // Fix 72: Comprehensive error catching to prevent server crash
+    console.error(`[QueueStatus] Critical error: ${String(err)}`);
     return new Response(
-      JSON.stringify({ success: false, error: String(err) }),
-      { status: 400, headers: { 'content-type': 'application/json', ...corsHeaders } },
+      JSON.stringify({ 
+        success: false, 
+        error: 'Internal Server Error',
+        message: String(err) 
+      }),
+      { status: 500, headers: responseHeaders },
     );
   }
 });
