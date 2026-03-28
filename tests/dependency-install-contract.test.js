@@ -13,6 +13,6 @@ test('backend dependency install/runtime contract is deterministic for Vercel an
   assert.equal(vercelConfig.installCommand, 'pnpm install --frozen-lockfile');
   assert.equal(vercelConfig.buildCommand, 'pnpm run build');
 
-  assert.doesNotMatch(vercelConfig.installCommand, /npm install/);
-  assert.doesNotMatch(vercelConfig.buildCommand, /npm install/);
+  assert.doesNotMatch(vercelConfig.installCommand, /\bnpm install\b/);
+  assert.doesNotMatch(vercelConfig.buildCommand, /\bnpm install\b/);
 });
