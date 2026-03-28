@@ -9,11 +9,15 @@ export const generatePinCode = (min = 2, max = 99) => {
 };
 
 export const getServiceDayBoundaries = () => {
-  const now = new Date();
+  const timezoneOffsetMinutes = Number.parseInt(process.env.PIN_SERVICE_UTC_OFFSET_MINUTES || '180', 10);
+  const nowUtc = new Date();
+  const localNow = new Date(nowUtc.getTime() + timezoneOffsetMinutes * 60 * 1000);
   // Service day starts at 05:00 AM
-  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 5, 0, 0, 0);
+  const startLocal = new Date(localNow.getFullYear(), localNow.getMonth(), localNow.getDate(), 5, 0, 0, 0);
   // Service day ends at 12:00 AM (Midnight)
-  const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+  const endLocal = new Date(localNow.getFullYear(), localNow.getMonth(), localNow.getDate(), 23, 59, 59, 999);
+  const start = new Date(startLocal.getTime() - timezoneOffsetMinutes * 60 * 1000);
+  const end = new Date(endLocal.getTime() - timezoneOffsetMinutes * 60 * 1000);
   
   // If current time is before 05:00 AM, the "service day" hasn't started yet
   // or it belongs to the previous calendar day's late session (but here we strictly start at 5 AM)
@@ -51,9 +55,14 @@ export const findLatestValidPin = async (db, clinicId, pin = null) => {
     .from('pins')
     .select('id, clinic_id, pin, valid_until, used_at, created_at')
     .eq('clinic_id', clinicId)
-    .gte('created_at', start.toISOString())
-    .lte('created_at', end.toISOString())
     .gt('valid_until', now.toISOString());
+
+  if (typeof query.gte === 'function') {
+    query = query.gte('created_at', start.toISOString());
+  }
+  if (typeof query.lte === 'function') {
+    query = query.lte('created_at', end.toISOString());
+  }
 
   if (pin) query = query.eq('pin', pin);
 

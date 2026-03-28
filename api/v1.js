@@ -131,6 +131,19 @@ export default async function handler(req, res) {
       return res.status(200).json({ status: 'ok', ok: true, version: '3.9.3-canonical-fix', timestamp: new Date().toISOString() });
     }
 
+    if (pathname === '/api/v1/status' && method === 'GET') {
+      return res.status(200).json({
+        success: true,
+        data: {
+          status: 'healthy',
+          mode: 'online',
+          backend: 'up',
+          platform: 'vercel',
+          timestamp: new Date().toISOString(),
+        },
+      });
+    }
+
     // ==================== PATIENT LOGIN ====================
     if ((pathname === '/api/v1/patient/login' || pathname === '/api/v1/patients/login') && method === 'POST') {
       const patientId = normalizePatientIdentifier(body.personalId || body.patientId);
@@ -214,37 +227,11 @@ export default async function handler(req, res) {
       });
       
       if (rpcError || !rpcResult || rpcResult.length === 0) {
-        // Fallback إذا فشل RPC: الإدخال المباشر في queues
-        const today = new Date().toISOString().split('T')[0];
-        const { data: lastEntry } = await supabase
-          .from('queues')
-          .select('display_number')
-          .eq('clinic_id', clinicId)
-          .eq('queue_date', today)
-          .order('display_number', { ascending: false })
-          .limit(1);
-        
-        const nextNumber = (lastEntry?.[0]?.display_number || 0) + 1;
-        
-        const { data: insertResult, error: insertError } = await supabase
-          .from('queues')
-          .insert([{
-            clinic_id: clinicId,
-            patient_id: patientId,
-            patient_name: body.patientName || null,
-            exam_type: body.examType || null,
-            display_number: nextNumber,
-            queue_number_int: nextNumber,
-            status: 'waiting',
-            queue_date: today,
-            entered_at: new Date().toISOString(),
-            metadata: {}
-          }])
-          .select()
-          .single();
-          
-        if (insertError) return res.status(500).json({ success: false, error: 'QUEUE_ENTRY_FAILED', details: insertError.message });
-        return res.status(200).json({ success: true, data: insertResult });
+        return res.status(503).json({
+          success: false,
+          error: 'ATOMIC_QUEUE_RPC_UNAVAILABLE',
+          details: rpcError?.message || 'Queue RPC returned no rows',
+        });
       }
       
       const result = rpcResult[0];
@@ -256,6 +243,44 @@ export default async function handler(req, res) {
       if (!clinicId) return res.status(400).json({ success: false, error: 'MISSING_CLINIC_ID' });
       const payload = await buildQueueStatusPayload(supabase, clinicId);
       return res.status(200).json({ success: true, data: payload });
+    }
+
+    if (pathname === '/api/v1/queue/call' && method === 'POST') {
+      const clinicId = String(body.clinicId || body.clinic_id || '').trim();
+      if (!clinicId) return res.status(400).json({ success: false, error: 'MISSING_CLINIC_ID' });
+
+      const today = new Date().toISOString().split('T')[0];
+      const { data: nextInQueue, error: nextInQueueError } = await supabase
+        .from('queues')
+        .select('id, clinic_id, patient_id, display_number, queue_number_int, status')
+        .eq('clinic_id', clinicId)
+        .eq('queue_date', today)
+        .eq('status', 'waiting')
+        .order('queue_number_int', { ascending: true })
+        .limit(1)
+        .maybeSingle();
+
+      if (nextInQueueError) {
+        return res.status(500).json({ success: false, error: 'QUEUE_CALL_FETCH_FAILED', details: nextInQueueError.message });
+      }
+      if (!nextInQueue) {
+        return res.status(404).json({ success: false, error: 'NO_WAITING_PATIENTS' });
+      }
+
+      const nowIso = new Date().toISOString();
+      const { data: calledRow, error: calledRowError } = await supabase
+        .from('queues')
+        .update({ status: 'called', called_at: nowIso })
+        .eq('id', nextInQueue.id)
+        .eq('clinic_id', clinicId)
+        .select('id, clinic_id, patient_id, display_number, queue_number_int, status, called_at')
+        .maybeSingle();
+
+      if (calledRowError) {
+        return res.status(500).json({ success: false, error: 'QUEUE_CALL_UPDATE_FAILED', details: calledRowError.message });
+      }
+
+      return res.status(200).json({ success: true, data: calledRow });
     }
 
     // ==================== CLINICS & SETTINGS ====================
@@ -298,6 +323,26 @@ export default async function handler(req, res) {
       });
     }
 
+    if (pathname === '/api/v1/admins' && method === 'GET') {
+      const { data: admins, error: adminsError } = await supabase
+        .from('admins')
+        .select('id, username, role, created_at')
+        .order('created_at', { ascending: false });
+      if (adminsError) return res.status(500).json({ success: false, error: 'FETCH_ADMINS_FAILED', details: adminsError.message });
+      return res.status(200).json({ success: true, data: admins || [] });
+    }
+
+    if (pathname === '/api/v1/qa/deep_run' && method === 'GET') {
+      return res.status(200).json({
+        success: true,
+        data: {
+          ok: true,
+          checks: ['api_v1_loaded', 'supabase_client_configured'],
+          timestamp: new Date().toISOString(),
+        },
+      });
+    }
+
     if (pathname.startsWith('/api/v1/admin/')) {
       const authHeader = getAuthorizationHeader(req.headers);
       if (!verifyAdminBearerToken(authHeader, ADMIN_AUTH_SECRET)) {
@@ -312,8 +357,7 @@ export default async function handler(req, res) {
       }
     }
 
-    // الرد الافتراضي
-    return res.status(404).json({ success: false, error: 'ENDPOINT_NOT_FOUND' });
+    return await delegatedV1Handler(req, res, { supabase, ADMIN_AUTH_SECRET });
   } catch (error) {
     console.error('API Error:', error);
     return res.status(500).json({ success: false, error: 'INTERNAL_SERVER_ERROR', message: error.message });
