@@ -105,11 +105,6 @@ export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
   if (req.method === 'OPTIONS') return res.status(200).end();
 
-  const supabase = getSupabaseClient();
-  if (!supabase) {
-    return res.status(503).json({ success: false, error: 'Server is missing Supabase environment configuration.' });
-  }
-
   let body = {};
   if (['POST', 'PATCH', 'PUT', 'DELETE'].includes(req.method)) {
     if (typeof req.body === 'string') {
@@ -125,6 +120,7 @@ export default async function handler(req, res) {
   const parsedUrl = new URL(fullUrl);
   const pathname = parsedUrl.pathname;
   
+  let supabase = null;
   try {
     if (pathname === '/api/v1/health' || pathname === '/api/health') {
       return res.status(200).json({ status: 'ok', ok: true, version: '3.9.3-canonical-fix', timestamp: new Date().toISOString() });
@@ -141,6 +137,20 @@ export default async function handler(req, res) {
           timestamp: new Date().toISOString(),
         },
       });
+    }
+
+    try {
+      supabase = getSupabaseClient();
+    } catch (clientError) {
+      return res.status(503).json({
+        success: false,
+        error: 'SUPABASE_CLIENT_INIT_FAILED',
+        message: clientError?.message || 'Supabase initialization failed',
+      });
+    }
+
+    if (!supabase) {
+      return res.status(503).json({ success: false, error: 'Server is missing Supabase environment configuration.' });
     }
 
     // ==================== PATIENT LOGIN ====================
