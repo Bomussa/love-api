@@ -1,0 +1,21 @@
+{
+  "version": 2,
+  "headers": [
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        { "key": "Access-Control-Allow-Origin", "value": "*" },
+        { "key": "Access-Control-Allow-Methods", "value": "GET, POST, PUT, PATCH, DELETE, OPTIONS" },
+        { "key": "Access-Control-Allow-Headers", "value": "Content-Type, Authorization" },
+        { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
+      ]
+    }
+  ],
+  "rewrites": [
+    { "source": "/api/health", "destination": "/api/health.js" },
+    { "source": "/api/v1/health", "destination": "/api/v1.js" },
+    { "source": "/api/v1/status", "destination": "/api/v1.js" },
+    { "source": "/api/v1/qa/deep_run", "destination": "/api/v1.js" },
+    { "source": "/api/v1/(.*)", "destination": "/api/v1.js" }
+  ]
+}
