@@ -61,7 +61,7 @@ async function handleEnterQueue(body, res) {
   }
 
   // استخدام RPC لضمان الذرية (Atomicity) ومنع تكرار الأرقام
-  const { data, error } = await supabase.rpc('enter_unified_queue_safe', {
+  const { data, error } = await supabase.rpc('enter_queue_safe', {
     p_clinic_id: clinicId,
     p_patient_id: patientId,
     p_patient_name: patientName,
@@ -111,7 +111,7 @@ async function handleQueueDone(body, res) {
   
   // 1. تحديث حالة الطابور
   const { error: queueError } = await supabase
-    .from('unified_queue')
+    .from('queues')
     .update({ 
       status: 'completed', 
       completed_at: now,
@@ -155,7 +155,7 @@ async function verifyPinInternal(clinicId, pin) {
 async function handleGetStatus(clinicId, res) {
   const today = new Date().toISOString().split('T')[0];
   const { data, error } = await supabase
-    .from('unified_queue')
+    .from('queues')
     .select('*')
     .eq('clinic_id', clinicId)
     .eq('queue_date', today)
