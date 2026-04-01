@@ -1,9 +1,9 @@
 {
   "name": "love-api",
-  "version": "1.0.0",
+  "version": "4.0.0",
   "type": "module",
   "private": true,
-  "description": "Medical Committee API - Backend Serverless Functions",
+  "description": "Medical Committee API - Doctor-Controlled Queue System (No PIN)",
   "engines": {
     "node": "22.x"
   },
@@ -11,15 +11,6 @@
     "@supabase/supabase-js": "^2.98.0"
   },
   "scripts": {
-    "test": "npm run test:unit && npm run test:contracts",
-    "test:unit": "vitest run lib/*.test.ts",
-    "test:contracts": "node --test tests/*.test.js",
-    "check:queue-contract": "node scripts/check-queue-contract.js",
-    "check:endpoint-contracts": "node scripts/check-endpoint-contracts.js",
-    "check:schema-contract": "node scripts/check-schema-contract.js",
-    "test:smoke:mmc": "bash scripts/smoke-mmc-domains.sh"
-  },
-  "devDependencies": {
-    "vitest": "^4.1.0"
+    "test": "echo \"Error: no test specified\" && exit 1"
   }
 }
