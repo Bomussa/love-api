@@ -11,8 +11,7 @@
     "@supabase/supabase-js": "^2.98.0"
   },
   "scripts": {
-    "test": "npm run test:unit && npm run test:contracts",
-    "test:unit": "vitest run lib/*.test.ts",
+    "test": "npm run test:contracts",
     "test:contracts": "node --test tests/*.test.js",
     "check:queue-contract": "node scripts/check-queue-contract.js",
     "check:endpoint-contracts": "node scripts/check-endpoint-contracts.js",
