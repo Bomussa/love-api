@@ -5,6 +5,7 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE TABLE IF NOT EXISTS clinics (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name TEXT NOT NULL,
+  code TEXT UNIQUE,
   current_load INTEGER DEFAULT 0
 );
 
@@ -67,7 +68,7 @@ BEGIN
   <<retry_insert>>
   LOOP
     BEGIN
-      PERFORM 1 FROM clinics WHERE id::text = v_first_clinic FOR UPDATE;
+      PERFORM 1 FROM clinics WHERE code = v_first_clinic FOR UPDATE;
 
       SELECT COALESCE(MAX(queue_number), 0)
       INTO v_max
@@ -97,7 +98,7 @@ BEGIN
 
       UPDATE clinics
       SET current_load = current_load + 1
-      WHERE id::text = v_first_clinic;
+      WHERE code = v_first_clinic;
 
       RETURN QUERY SELECT v_queue_id, v_max + 1, 0;
       EXIT retry_insert;
@@ -213,7 +214,7 @@ BEGIN
   WHERE id = p_queue_id;
 
   IF v_next_status = 'DONE' THEN
-    UPDATE clinics SET current_load = GREATEST(0, current_load - 1) WHERE id::text = v_q.clinic_id;
+    UPDATE clinics SET current_load = GREATEST(0, current_load - 1) WHERE code = v_q.clinic_id;
   END IF;
 
   RETURN QUERY SELECT id, status, current_step, version FROM queues WHERE id = p_queue_id;
