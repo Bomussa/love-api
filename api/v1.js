@@ -245,9 +245,9 @@ export default async function handler(req, res) {
       if (!sb) return reply(503, { success: false, error: 'Database unavailable' });
       const { clinicId } = body;
       if (!clinicId) return reply(400, { success: false, error: 'clinicId required' });
-      const { data: next } = await sb.from('queues').select('*').eq('clinic_id', clinicId).eq('queue_date', today).eq('status', 'WAITING').order('display_number').limit(1).maybeSingle();
+      const { data: next } = await sb.from('unified_queue').select('*').eq('clinic_id', clinicId).eq('queue_date', today).eq('status', 'waiting').order('display_number').limit(1).maybeSingle();
       if (!next) return reply(200, { success: true, data: { message: 'Queue empty', clinicId } });
-      await sb.from('queues').update({ called_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', next.id);
+      await sb.from('unified_queue').update({ status: 'called', called_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', next.id);
       return reply(200, { success: true, data: { queueId: next.id, number: next.display_number, patient_id: next.patient_id, called_at: new Date().toISOString(), clinicId } });
     }
 
@@ -256,15 +256,15 @@ export default async function handler(req, res) {
       if (!sb) return reply(503, { success: false, error: 'Database unavailable' });
       const { queueId } = body;
       if (!queueId) return reply(400, { success: false, error: 'queueId required' });
-      const { data: q } = await sb.from('queues').select('*').eq('id', queueId).single();
+      const { data: q } = await sb.from('unified_queue').select('*').eq('id', queueId).single();
       if (!q) return reply(404, { success: false, error: 'Queue not found' });
-      if (q.status !== 'WAITING') return reply(409, { success: false, error: `Cannot start: status is ${q.status}, must be WAITING`, code: 'INVALID_STATE_TRANSITION' });
-      const { data: u, error: uErr } = await sb.from('queues').update({
-        status: 'IN_PROGRESS', current_step: Math.max(q.current_step || 0, 1),
-        activated_at: new Date().toISOString(), version: (q.version || 1) + 1, updated_at: new Date().toISOString(),
+      if (q.status !== 'waiting' && q.status !== 'called') return reply(409, { success: false, error: `Cannot start: status is ${q.status}, must be waiting or called`, code: 'INVALID_STATE_TRANSITION' });
+      const { data: u, error: uErr } = await sb.from('unified_queue').update({
+        status: 'in_progress',
+        activated_at: new Date().toISOString(), updated_at: new Date().toISOString(),
       }).eq('id', queueId).select('*').single();
       if (uErr) throw uErr;
-      return reply(200, { success: true, data: { queueId: u.id, status: u.status, current_step: u.current_step, activated_at: u.activated_at, version: u.version } });
+      return reply(200, { success: true, data: { queueId: u.id, status: u.status, activated_at: u.activated_at } });
     }
 
     // ── QUEUE ADVANCE: doctor-only, enforces clinic match ──────────────────────
