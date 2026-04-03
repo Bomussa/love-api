@@ -7,10 +7,13 @@ const corsHeaders = {
     'Access-Control-Allow-Methods': 'POST, OPTIONS'
 };
 
-// Hardcoded fallback admin credentials
-const FALLBACK_ADMIN = {
-    username: 'admin',
-    password: 'admin123'
+// Admin credentials are loaded from environment variables only
+// No hardcoded credentials for security
+const getFallbackAdmin = () => {
+    const username = Deno.env.get('FALLBACK_ADMIN_USERNAME');
+    const password = Deno.env.get('FALLBACK_ADMIN_PASSWORD');
+    if (!username || !password) return null;
+    return { username, password };
 };
 
 serve(async (req) => {
@@ -44,14 +47,19 @@ serve(async (req) => {
             });
         }
 
-        // Fallback to hardcoded admin for development
-        if (username.toLowerCase() === FALLBACK_ADMIN.username && password === FALLBACK_ADMIN.password) {
+        // Check fallback admin from environment variables (for emergency access only)
+        const fallbackAdmin = getFallbackAdmin();
+        if (fallbackAdmin && username.toLowerCase() === fallbackAdmin.username && password === fallbackAdmin.password) {
+            // Log emergency access
+            console.warn('Emergency fallback admin access used:', { username, timestamp: new Date().toISOString() });
+            
             return new Response(JSON.stringify({
                 success: true,
                 token: 'admin_token_' + Date.now(),
                 user: {
-                    username: 'admin',
-                    role: 'SUPER_ADMIN'
+                    username: fallbackAdmin.username,
+                    role: 'SUPER_ADMIN',
+                    isEmergency: true
                 }
             }), {
                 headers: { 'content-type': 'application/json', ...corsHeaders }
