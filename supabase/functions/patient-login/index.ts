@@ -1,6 +1,30 @@
+/**
+ * @fileoverview Patient Login Edge Function
+ * @description Handles patient authentication and session creation for the Medical Committee system.
+ *              Validates input, creates/retrieves patient records, and generates secure session tokens.
+ * @version 2.0.0
+ * @module supabase/functions/patient-login
+ * 
+ * @example
+ * // Request body:
+ * {
+ *   "militaryId": "ABC12345",
+ *   "name": "John Doe",
+ *   "examType": "comprehensive"
+ * }
+ * 
+ * // Success response:
+ * {
+ *   "success": true,
+ *   "token": "mmc_uuid_timestamp",
+ *   "patient": { "id": "...", "name": "...", "militaryId": "...", "examType": "..." }
+ * }
+ */
+
 import { serve } from "https://deno.land/std/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
+/** CORS headers for cross-origin requests */
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -19,8 +43,28 @@ serve(async (req: Request) => {
 
         const { militaryId, name, examType } = await req.json();
 
+        // Enhanced input validation
         if (!militaryId || !name) {
             throw new Error('Military ID and name are required');
+        }
+        
+        // Validate military ID format (alphanumeric, 5-20 characters)
+        const militaryIdStr = String(militaryId).trim();
+        if (!/^[a-zA-Z0-9]{5,20}$/.test(militaryIdStr)) {
+            throw new Error('Invalid military ID format. Must be 5-20 alphanumeric characters');
+        }
+        
+        // Validate name (2-100 characters, letters and spaces only)
+        const nameStr = String(name).trim();
+        if (!/^[\u0600-\u06FFa-zA-Z\s]{2,100}$/.test(nameStr)) {
+            throw new Error('Invalid name format. Must be 2-100 characters (letters only)');
+        }
+        
+        // Validate exam type if provided
+        const validExamTypes = ['comprehensive', 'general', 'specialist', 'followup'];
+        const examTypeStr = examType ? String(examType).trim().toLowerCase() : 'comprehensive';
+        if (!validExamTypes.includes(examTypeStr)) {
+            throw new Error(`Invalid exam type. Must be one of: ${validExamTypes.join(', ')}`);
         }
 
         // Create Supabase client
