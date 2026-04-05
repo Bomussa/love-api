@@ -3,27 +3,28 @@
   "functions": {
     "api/v1.js": {
       "maxDuration": 30
-    },
-    "api/health.js": {
-      "maxDuration": 10
-    },
-    "api/index.js": {
-      "maxDuration": 10
     }
   },
-  "rewrites": [
-    { "source": "/api/v1/(.*)", "destination": "/api/v1.js" },
-    { "source": "/api/health", "destination": "/api/health.js" },
-    { "source": "/(.*)", "destination": "/api/index.js" }
-  ],
-  "headers": [
+  "routes": [
     {
-      "source": "/api/(.*)",
-      "headers": [
-        { "key": "Access-Control-Allow-Origin", "value": "*" },
-        { "key": "Access-Control-Allow-Methods", "value": "GET, POST, PUT, PATCH, DELETE, OPTIONS" },
-        { "key": "Access-Control-Allow-Headers", "value": "Content-Type, Authorization" }
-      ]
+      "src": "/api/v1/(.*)",
+      "dest": "/api/v1.js"
+    },
+    {
+      "src": "/api/health",
+      "dest": "/api/v1.js"
+    },
+    {
+      "src": "/api/status",
+      "dest": "/api/v1.js"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/api/v1.js"
     }
-  ]
+  ],
+  "env": {
+    "SUPABASE_URL": "https://rujwuruuosffcxazymit.supabase.co",
+    "SUPABASE_SERVICE_ROLE_KEY": "@supabase-service-role-key"
+  }
 }

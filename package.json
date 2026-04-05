@@ -1,6 +1,6 @@
 {
   "name": "love-api",
-  "version": "4.0.0",
+  "version": "5.0.0",
   "type": "module",
   "private": true,
   "description": "Medical Committee API - Doctor-Controlled Queue System (No PIN)",
@@ -11,6 +11,7 @@
     "@supabase/supabase-js": "^2.98.0"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node verify-system.js",
+    "verify": "node verify-system.js"
   }
 }
