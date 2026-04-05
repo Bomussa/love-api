@@ -23,11 +23,7 @@ export function generateUniqueNumber() {
   return parseInt(`${timestamp}${random}`);
 }
 
-// Generate PIN - ⚠️ DEPRECATED: PIN system permanently removed
-export function generatePIN() {
-  console.warn('[helpers] generatePIN() is deprecated - PIN system removed');
-  return null;
-}
+// PIN system permanently removed - function deleted
 
 // Validate Patient ID
 export function validatePatientId(patientId) {
