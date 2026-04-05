@@ -15,7 +15,7 @@ import crypto from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 import {
   createAdminToken, verifyAdminBearerToken,
-  hasValidAdminSecret, verifyAdminPassword,
+  hasValidAdminSecret, verifyPasswordHash, hashPassword,
 } from '../lib/admin-auth.js';
 
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -54,11 +54,6 @@ function getSupabase() {
   });
 }
 
-function hashPassword(pw) {
-  const salt = crypto.randomBytes(16).toString('hex');
-  const hash = crypto.scryptSync(pw, salt, 64).toString('hex');
-  return `${salt}:${hash}`;
-}
 
 function getPathId(pathname, base) {
   if (!pathname.startsWith(base)) return null;
@@ -360,7 +355,7 @@ export default async function handler(req, res) {
       if (!username || !password) return reply(400, { success: false, error: 'username and password required' });
       if (!sb) return reply(503, { success: false, error: 'Database unavailable' });
       const { data: admin } = await sb.from('admins').select('*').eq('username', username).maybeSingle();
-      if (!admin || !verifyAdminPassword(password, admin.password_hash)) return reply(401, { success: false, error: 'Invalid credentials' });
+      if (!admin || !verifyPasswordHash(password, admin.password_hash)) return reply(401, { success: false, error: 'Invalid credentials' });
       if (!hasValidAdminSecret(ADMIN_AUTH_SECRET)) return reply(503, { success: false, error: 'Server configuration error' });
       const token = createAdminToken({ id: admin.id, username, role: admin.role }, ADMIN_AUTH_SECRET, Date.now());
       return reply(200, { success: true, data: { session: { username, role: admin.role, token, expiresAt: new Date(Date.now() + 86_400_000).toISOString() } } });
