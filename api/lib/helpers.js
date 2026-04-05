@@ -23,9 +23,10 @@ export function generateUniqueNumber() {
   return parseInt(`${timestamp}${random}`);
 }
 
-// Generate PIN
+// Generate PIN - ⚠️ DEPRECATED: PIN system permanently removed
 export function generatePIN() {
-  return String(Math.floor(Math.random() * 90) + 10).padStart(2, '0');
+  console.warn('[helpers] generatePIN() is deprecated - PIN system removed');
+  return null;
 }
 
 // Validate Patient ID
