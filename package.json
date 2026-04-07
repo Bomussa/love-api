@@ -11,6 +11,8 @@
     "@supabase/supabase-js": "^2.98.0"
   },
   "scripts": {
+    "dev": "node api/v1.js",
+    "test:smoke": "node tests/smoke.test.js",
     "test": "npm run test:unit && npm run test:contracts",
     "test:unit": "vitest run lib/*.test.ts",
     "test:contracts": "node --test tests/*.test.js",
