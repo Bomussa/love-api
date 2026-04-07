@@ -49,6 +49,43 @@ export default async function handler(req, res) {
     }
 
     // ═══════════════════════════════════════════
+    // PATIENT OPERATIONS
+    // ═══════════════════════════════════════════
+    if (pathname === '/api/v1/patient/login' && method === 'POST') {
+      const { personalId, gender } = body;
+      if (!personalId) return reply(400, { success: false, error: 'Personal ID is required' });
+
+      // Check if patient exists, or create new one
+      let { data: patient, error } = await sb.from('patients').select('*').eq('personal_id', personalId).maybeSingle();
+      
+      if (error) return reply(400, { success: false, error: error.message });
+      
+      if (!patient) {
+        const { data: newPatient, error: createError } = await sb.from('patients').insert({
+          personal_id: personalId,
+          military_id: personalId,
+          name: `Patient ${personalId}`,
+          gender: gender || 'male',
+          status: 'active'
+        }).select().single();
+        
+        if (createError) return reply(400, { success: false, error: createError.message });
+        patient = newPatient;
+      }
+
+      return reply(200, {
+        success: true,
+        data: {
+          id: patient.id,
+          patient_id: patient.personal_id,
+          personalId: patient.personal_id,
+          gender: patient.gender,
+          name: patient.name
+        }
+      });
+    }
+
+    // ═══════════════════════════════════════════
     // AUTHENTICATION MIDDLEWARE
     // ═══════════════════════════════════════════
     const authHeader = req.headers.authorization;
