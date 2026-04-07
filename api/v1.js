@@ -1,324 +1,130 @@
-/**
- * Unified API V1 Handler - Professionally Synchronized with Supabase Schema
- * 
- * This file handles all REST/RPC traffic for love-api, ensuring 100% compatibility 
- * with the actual database schema and policies.
- * 
- * Updated: 2026-04-07
- */
 import { createClient } from '@supabase/supabase-js';
-import { createAdminToken, verifyAdminBearerToken } from '../lib/admin-auth.js';
+import { CLINIC_FLOW } from '../lib/constants.js';
 
-export const QUEUE_STATUS = { WAITING: "WAITING", IN_PROGRESS: "IN_PROGRESS", DONE: "DONE", CANCELLED: "CANCELLED" };
-export const invokeRpcSafe = async (supabase, fn, args) => {
-  const { data, error } = await supabase.rpc(fn, args);
-  if (error && error.code === "42883") return { ok: false, missing: true, error };
-  return { ok: !error, data, error };
-};
-// Environment variables
-const SUPABASE_URL = process.env.SUPABASE_URL || 'https://rujwuruuosffcxazymit.supabase.co';
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const ADMIN_AUTH_SECRET = process.env.ADMIN_AUTH_SECRET || 'your-secret-key';
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE
+);
 
-// Initialize Supabase with service role for full access (logic handles RLS/Auth)
-const sb = (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) ? createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY) : null;
-
-export default async function handler(req, res) { if (!sb) return res.status(500).json({ error: "Supabase not configured" });
-  // CORS Headers
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Idempotency-Key, X-API-Version');
-  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-
-  if (req.method === 'OPTIONS') return res.status(200).end();
-
-  const { method, body, url: fullUrl } = req;
-  const parsedUrl = new URL(fullUrl, `http://${req.headers.host || 'localhost'}`);
-  const pathname = parsedUrl.pathname;
-  const query = Object.fromEntries(parsedUrl.searchParams);
-  
-  // Helper for consistent responses
-  const reply = (status, payload) => res.status(status).json(payload);
-  
+export default async function handler(req, res) {
   try {
-    // ═══════════════════════════════════════════
-    // HEALTH & STATUS
-    if (pathname === "/api/v1/admins" && method === "GET") {
-      if (!user || user.role !== "admin") return reply(403, { success: false, error: "Admin access required" });
-      const { data, error } = await sb.from("admins").select("id, username, role, created_at");
-      if (error) return reply(400, { success: false, error: error.message });
-      return reply(200, { success: true, data });
-    }
-    if (pathname === "/api/v1/qa/deep_run" && method === "POST") {
-      return reply(200, { success: true, message: "QA Deep Run initiated", timestamp: new Date().toISOString() });
-    }
-    if (pathname === "/api/v1/pin/verify") {}
-    if (pathname === "/api/v1/queue/call") {}
-    // ═══════════════════════════════════════════
-    if (pathname === '/api/v1/health' || pathname === '/api/v1/status' || pathname === '/api/health') {
-      return reply(200, { 
-        success: true, 
-        status: 'online', 
-        database: 'connected',
-        timestamp: new Date().toISOString(),
-        version: '7.1.0'
-      });
+    const { method, url } = req;
+    const parsedUrl = new URL(url, `http://${req.headers.host}`);
+    const path = parsedUrl.pathname;
+
+    // =========================
+    // HEALTH
+    // =========================
+    if (path === '/api/v1/health') {
+      return res.json({ success: true });
     }
 
-    // ═══════════════════════════════════════════
-    // PATIENT OPERATIONS
-    // ═══════════════════════════════════════════
-    if (pathname === '/api/v1/patient/login' && method === 'POST') {
-      const { personalId, gender } = body;
-      if (!personalId) return reply(400, { success: false, error: 'Personal ID is required' });
+    // =========================
+    // PATIENT LOGIN
+    // =========================
+    if (path === '/api/v1/patient/login' && method === 'POST') {
+      const body = req.body;
 
-      // Check if patient exists, or create new one
-      let { data: patient, error } = await sb.from('patients').select('*').eq('personal_id', personalId).maybeSingle();
-      
-      if (error) return reply(400, { success: false, error: error.message });
-      
-      if (!patient) {
-        const { data: newPatient, error: createError } = await sb.from('patients').insert({
-          patient_id: personalId,
-          personal_id: personalId,
-          military_id: personalId,
-          name: `Patient ${personalId}`,
-          gender: gender || 'male',
-          status: 'active'
-        }).select().single();
-        
-        if (createError) return reply(400, { success: false, error: createError.message });
-        patient = newPatient;
+      const flow = CLINIC_FLOW[`${body.examType}_${body.gender}`];
+
+      if (!flow) {
+        return res.status(400).json({ error: 'Invalid flow' });
       }
 
-      return reply(200, {
+      return res.json({
         success: true,
         data: {
-          id: patient.id,
-          patient_id: patient.personal_id,
-          personalId: patient.personal_id,
-          gender: patient.gender,
-          name: patient.name
+          patient_id: body.personalId,
+          flow
         }
       });
     }
 
-    // ═══════════════════════════════════════════
-    // AUTHENTICATION MIDDLEWARE
-    // ═══════════════════════════════════════════
-    const authHeader = req.headers.authorization;
-    let user = null;
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-      const token = authHeader.split(' ')[1];
-      try {
-        user = verifyAdminBearerToken(token, ADMIN_AUTH_SECRET);
-      } catch (e) {
-        console.warn('[Auth Warning] Invalid token provided');
+    // =========================
+    // CREATE QUEUE
+    // =========================
+    if (path === '/api/v1/queue/create' && method === 'POST') {
+      const body = req.body;
+
+      const { data, error } = await supabase
+        .from('queues')
+        .insert([{
+          patient_id: body.patient_id,
+          clinic_id: body.clinic_id,
+          status: 'waiting'
+        }])
+        .select();
+
+      if (error) throw error;
+
+      return res.json({ success: true, data });
+    }
+
+    // =========================
+    // STATUS
+    // =========================
+    if (path === '/api/v1/queue/status' && method === 'GET') {
+      const clinic_id = parsedUrl.searchParams.get('clinic_id');
+
+      if (!clinic_id) {
+        return res.status(400).json({ error: 'clinic_id required' });
       }
+
+      const { data, error } = await supabase
+        .from('queues')
+        .select('*')
+        .eq('clinic_id', clinic_id)
+        .order('created_at');
+
+      if (error) throw error;
+
+      return res.json({ success: true, data });
     }
 
-    // ═══════════════════════════════════════════
-    // RPC ROUTER (Dynamic handling of Supabase RPCs)
-    // ═══════════════════════════════════════════
-    if (pathname.startsWith('/api/v1/rpc/')) {
-      const rpcName = pathname.replace('/api/v1/rpc/', '');
-      
-      // List of RPCs that require authentication
-      const protectedRpcs = ['exec_sql', 'generate_daily_pins', 'daily_cleanup_comprehensive', 'rls_auto_enable'];
-      if (protectedRpcs.includes(rpcName) && (!user || user.role !== 'admin')) {
-        return reply(403, { success: false, error: 'Unauthorized RPC access' });
-      }
+    // =========================
+    // CALL NEXT
+    // =========================
+    if (path === '/api/v1/queue/call' && method === 'POST') {
+      const { clinic_id } = req.body;
 
-      const { data, error } = await sb.rpc(rpcName, body || {});
-      if (error) {
-        console.error(`[RPC Error] ${rpcName}:`, error);
-        return reply(400, { success: false, error: error.message, code: error.code });
-      }
-      return reply(200, { success: true, data });
+      const { data } = await supabase
+        .from('queues')
+        .select('*')
+        .eq('clinic_id', clinic_id)
+        .eq('status', 'waiting')
+        .order('created_at')
+        .limit(1)
+        .single();
+
+      if (!data) return res.json({ success: false });
+
+      await supabase
+        .from('queues')
+        .update({ status: 'called' })
+        .eq('id', data.id);
+
+      return res.json({ success: true, data });
     }
 
-    // ═══════════════════════════════════════════
-    // QUEUE OPERATIONS (Standardized & Resilient)
-    // ═══════════════════════════════════════════
-    
-    // NEW: POST /api/v1/queue/create
-    if (pathname === '/api/v1/queue/create' && method === 'POST') {
-      const { data, error } = await sb.rpc('enter_unified_queue_safe', body);
-      if (error) return reply(400, { success: false, error: error.message });
-      return reply(201, { success: true, data });
+    // =========================
+    // DONE
+    // =========================
+    if (path === '/api/v1/queue/done' && method === 'POST') {
+      const { id } = req.body;
+
+      await supabase
+        .from('queues')
+        .update({ status: 'done' })
+        .eq('id', id);
+
+      return res.json({ success: true });
     }
 
-    if (pathname === '/api/v1/queue/call' && method === 'POST') {
-      if (!user || user.role !== 'admin') {
-        return reply(403, { success: false, error: 'Admin access required to call next patient' });
-      }
-      const { clinicId } = body;
-      if (!clinicId) return reply(400, { success: false, error: 'Clinic ID is required' });
-
-      const { data, error } = await sb.rpc('call_next_patient', { p_clinic_id: clinicId });
-      if (error) return reply(400, { success: false, error: error.message });
-      return reply(200, { success: true, data });
-    }
-
-    if (pathname === '/api/v1/queue/start' && method === 'POST') {
-      if (!user || user.role !== 'admin') {
-        return reply(403, { success: false, error: 'Admin access required to start exam' });
-      }
-      const { queueId } = body;
-      if (!queueId) return reply(400, { success: false, error: 'Queue ID is required' });
-
-      const { data, error } = await sb.rpc('start_exam', { p_queue_id: queueId });
-      if (error) return reply(400, { success: false, error: error.message });
-      return reply(200, { success: true, data });
-    }
-
-    // UPDATED: POST /api/v1/queue/advance/:id
-    if (pathname.startsWith('/api/v1/queue/advance') && method === 'POST') {
-      if (!user || user.role !== 'admin') {
-        return reply(403, { success: false, error: 'Admin access required to advance queue' });
-      }
-      
-      const parts = pathname.split('/');
-      const queueIdFromPath = parts[parts.length - 1];
-      const { queueId, clinicId } = body;
-      const finalQueueId = queueId || queueIdFromPath;
-      
-      if (!finalQueueId || !clinicId) return reply(400, { success: false, error: 'Queue ID and Clinic ID are required' });
-
-      const { data, error } = await sb.rpc('advance_queue', { p_queue_id: finalQueueId, p_clinic_id: clinicId });
-      if (error) return reply(400, { success: false, error: error.message });
-      return reply(200, { success: true, data });
-    }
-
-    if (pathname === '/api/v1/queue/done' && method === 'POST') {
-      if (!user || user.role !== 'admin') {
-        return reply(403, { success: false, error: 'Admin access required to mark queue as done' });
-      }
-      const { clinicId, patientId } = body;
-      if (!clinicId || !patientId) return reply(400, { success: false, error: 'Clinic ID and Patient ID are required' });
-
-      const { data, error } = await sb.rpc('queue_done', { p_clinic_id: clinicId, p_patient_id: patientId });
-      if (error) return reply(400, { success: false, error: error.message });
-      return reply(200, { success: true, data });
-    }
-
-    if (pathname === '/api/v1/queue/status' && method === 'PATCH') {
-      if (!user || user.role !== 'admin') {
-        return reply(403, { success: false, error: 'Admin access required to update queue status' });
-      }
-      const { clinicId, patientId, status } = body;
-      if (!clinicId || !patientId || !status) return reply(400, { success: false, error: 'Clinic ID, Patient ID, and Status are required' });
-
-      const { data, error } = await sb.rpc('update_queue_status', { p_clinic_id: clinicId, p_patient_id: patientId, p_status: status });
-      if (error) return reply(400, { success: false, error: error.message });
-      return reply(200, { success: true, data });
-    }
-
-    if (pathname === '/api/v1/session/validate' && method === 'POST') {
-      const { token } = body;
-      if (!token) return reply(400, { success: false, error: 'Token is required' });
-
-      const { data, error } = await sb.rpc('validate_session', { p_token: token });
-      if (error) return reply(400, { success: false, error: error.message });
-      return reply(200, { success: true, data });
-    }
-
-    if (pathname === '/api/v1/queue/enter' && method === 'POST') {
-      const { data, error } = await sb.rpc('enter_unified_queue_safe', body);
-      if (error) return reply(400, { success: false, error: error.message });
-      return reply(200, { success: true, data });
-    }
-
-    // UPDATED: GET /api/v1/queue/status/:id
-    if (pathname.startsWith('/api/v1/queue/status') && method === 'GET') {
-      const parts = pathname.split('/');
-      const idFromPath = parts[parts.length - 1];
-      const { patient_id, clinic_id } = query;
-      const finalPatientId = patient_id || (idFromPath !== 'status' ? idFromPath : null);
-      
-      let queryBuilder = sb.from('v_queue_live').select('*');
-      
-      if (finalPatientId) queryBuilder = queryBuilder.eq('patient_id', finalPatientId);
-      if (clinic_id) queryBuilder = queryBuilder.eq('clinic_id', clinic_id);
-      
-      const { data, error } = await queryBuilder.maybeSingle();
-      if (error) return reply(400, { success: false, error: error.message });
-      if (!data) return reply(404, { success: false, error: 'No active queue entry found' });
-      return reply(200, { success: true, data });
-    }
-
-    // ═══════════════════════════════════════════
-    // ADMIN OPERATIONS
-    // ═══════════════════════════════════════════
-    if (pathname === '/api/v1/admin/login' && method === 'POST') {
-      const { username, password } = body;
-      const { data: admin, error } = await sb.from('admins').select('*').eq('username', username).maybeSingle();
-      
-      if (error || !admin) return reply(401, { success: false, error: 'Invalid credentials' });
-      
-      const token = createAdminToken({ id: admin.id, username: admin.username, role: admin.role }, ADMIN_AUTH_SECRET);
-      
-      return reply(200, {
-        success: true,
-        data: {
-          session: {
-            username: admin.username,
-            role: admin.role,
-            token,
-            expiresAt: new Date(Date.now() + 86400000).toISOString()
-          }
-        }
-      });
-    }
-
-    // ═══════════════════════════════════════════
-    // CLINIC & SYSTEM DATA
-    // ═══════════════════════════════════════════
-    if (pathname === '/api/v1/clinics' && method === 'GET') {
-      const { data, error } = await sb.from('clinics').select('*').eq('is_active', true).order('name_ar');
-      if (error) return reply(400, { success: false, error: error.message });
-      return reply(200, { success: true, data });
-    }
-
-    if (pathname === '/api/v1/settings' && method === 'GET') {
-      const { data, error } = await sb.from('system_settings').select('*');
-      if (error) return reply(400, { success: false, error: error.message });
-      return reply(200, { success: true, data });
-    }
-
-    // ═══════════════════════════════════════════
-    // CATCH-ALL FOR DYNAMIC TABLE ACCESS (REST)
-    // ═══════════════════════════════════════════
-    if (pathname.startsWith('/api/v1/db/')) {
-      if (!user || user.role !== 'admin') {
-        return reply(403, { success: false, error: 'Admin access required for direct DB operations' });
-      }
-      
-      const tableName = pathname.replace('/api/v1/db/', '');
-      let dbQuery = sb.from(tableName);
-      
-      switch (method) {
-        case 'GET':
-          const { data: gData, error: gErr } = await dbQuery.select('*').limit(100);
-          return gErr ? reply(400, { error: gErr.message }) : reply(200, { data: gData });
-        case 'POST':
-          const { data: pData, error: pErr } = await dbQuery.insert(body).select();
-          return pErr ? reply(400, { error: pErr.message }) : reply(201, { data: pData });
-        case 'PATCH':
-          const { data: paData, error: paErr } = await dbQuery.match(query).update(body).select();
-          return paErr ? reply(400, { error: paErr.message }) : reply(200, { data: paData });
-        case 'DELETE':
-          const { data: dData, error: dErr } = await dbQuery.match(query).delete().select();
-          return dErr ? reply(400, { error: dErr.message }) : reply(200, { data: dData });
-        default:
-          return reply(405, { error: 'Method not allowed' });
-      }
-    }
-
-    return reply(404, { success: false, error: `Route ${pathname} not found` });
+    return res.status(404).json({ error: 'Not found' });
 
   } catch (err) {
-    console.error('[API Critical Error]', err);
-    return reply(500, { success: false, error: 'Internal server error', details: err.message });
+    return res.status(500).json({
+      error: err.message
+    });
   }
 }
