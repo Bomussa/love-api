@@ -27,7 +27,7 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   const { method, body, url: fullUrl } = req;
-  const parsedUrl = new URL(fullUrl, \`http://\${req.headers.host || 'localhost'}\`);
+  const parsedUrl = new URL(fullUrl, `http://${req.headers.host || 'localhost'}`);
   const pathname = parsedUrl.pathname;
   const query = Object.fromEntries(parsedUrl.searchParams);
   
@@ -113,7 +113,7 @@ export default async function handler(req, res) {
 
       const { data, error } = await sb.rpc(rpcName, body || {});
       if (error) {
-        console.error(\`[RPC Error] \${rpcName}:\`, error);
+        console.error(`[RPC Error] ${rpcName}:`, error);
         return reply(400, { success: false, error: error.message, code: error.code });
       }
       return reply(200, { success: true, data });
@@ -278,7 +278,7 @@ export default async function handler(req, res) {
       }
     }
 
-    return reply(404, { success: false, error: \`Route \${pathname} not found\` });
+    return reply(404, { success: false, error: `Route ${pathname} not found` });
 
   } catch (err) {
     console.error('[API Critical Error]', err);
