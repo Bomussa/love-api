@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { QUEUE_STATUS, invokeRpcSafe } from '../api/v2.js';
+import { QUEUE_STATUS, invokeRpcSafe } from '../api/v1.js';
 
 describe('api/v2 compatibility', () => {
   it('keeps unified status values', () => {

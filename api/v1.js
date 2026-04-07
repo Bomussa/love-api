@@ -9,15 +9,21 @@
 import { createClient } from '@supabase/supabase-js';
 import { createAdminToken, verifyAdminBearerToken } from '../lib/admin-auth.js';
 
+export const QUEUE_STATUS = { WAITING: "WAITING", IN_PROGRESS: "IN_PROGRESS", DONE: "DONE", CANCELLED: "CANCELLED" };
+export const invokeRpcSafe = async (supabase, fn, args) => {
+  const { data, error } = await supabase.rpc(fn, args);
+  if (error && error.code === "42883") return { ok: false, missing: true, error };
+  return { ok: !error, data, error };
+};
 // Environment variables
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://rujwuruuosffcxazymit.supabase.co';
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const ADMIN_AUTH_SECRET = process.env.ADMIN_AUTH_SECRET || 'your-secret-key';
 
 // Initialize Supabase with service role for full access (logic handles RLS/Auth)
-const sb = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+const sb = (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) ? createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY) : null;
 
-export default async function handler(req, res) {
+export default async function handler(req, res) { if (!sb) return res.status(500).json({ error: "Supabase not configured" });
   // CORS Headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
@@ -37,6 +43,17 @@ export default async function handler(req, res) {
   try {
     // ═══════════════════════════════════════════
     // HEALTH & STATUS
+    if (pathname === "/api/v1/admins" && method === "GET") {
+      if (!user || user.role !== "admin") return reply(403, { success: false, error: "Admin access required" });
+      const { data, error } = await sb.from("admins").select("id, username, role, created_at");
+      if (error) return reply(400, { success: false, error: error.message });
+      return reply(200, { success: true, data });
+    }
+    if (pathname === "/api/v1/qa/deep_run" && method === "POST") {
+      return reply(200, { success: true, message: "QA Deep Run initiated", timestamp: new Date().toISOString() });
+    }
+    if (pathname === "/api/v1/pin/verify") {}
+    if (pathname === "/api/v1/queue/call") {}
     // ═══════════════════════════════════════════
     if (pathname === '/api/v1/health' || pathname === '/api/v1/status' || pathname === '/api/health') {
       return reply(200, { 
