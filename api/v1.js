@@ -62,6 +62,7 @@ export default async function handler(req, res) {
       
       if (!patient) {
         const { data: newPatient, error: createError } = await sb.from('patients').insert({
+          patient_id: personalId,
           personal_id: personalId,
           military_id: personalId,
           name: `Patient ${personalId}`,
