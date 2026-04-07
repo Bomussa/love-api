@@ -21,7 +21,7 @@ export default async function handler(req, res) {
   // CORS Headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Idempotency-Key');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Idempotency-Key, X-API-Version');
   res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
 
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -122,6 +122,14 @@ export default async function handler(req, res) {
     // ═══════════════════════════════════════════
     // QUEUE OPERATIONS (Standardized & Resilient)
     // ═══════════════════════════════════════════
+    
+    // NEW: POST /api/v1/queue/create
+    if (pathname === '/api/v1/queue/create' && method === 'POST') {
+      const { data, error } = await sb.rpc('enter_unified_queue_safe', body);
+      if (error) return reply(400, { success: false, error: error.message });
+      return reply(201, { success: true, data });
+    }
+
     if (pathname === '/api/v1/queue/call' && method === 'POST') {
       if (!user || user.role !== 'admin') {
         return reply(403, { success: false, error: 'Admin access required to call next patient' });
@@ -146,14 +154,20 @@ export default async function handler(req, res) {
       return reply(200, { success: true, data });
     }
 
-    if (pathname === '/api/v1/queue/advance' && method === 'POST') {
+    // UPDATED: POST /api/v1/queue/advance/:id
+    if (pathname.startsWith('/api/v1/queue/advance') && method === 'POST') {
       if (!user || user.role !== 'admin') {
         return reply(403, { success: false, error: 'Admin access required to advance queue' });
       }
+      
+      const parts = pathname.split('/');
+      const queueIdFromPath = parts[parts.length - 1];
       const { queueId, clinicId } = body;
-      if (!queueId || !clinicId) return reply(400, { success: false, error: 'Queue ID and Clinic ID are required' });
+      const finalQueueId = queueId || queueIdFromPath;
+      
+      if (!finalQueueId || !clinicId) return reply(400, { success: false, error: 'Queue ID and Clinic ID are required' });
 
-      const { data, error } = await sb.rpc('advance_queue', { p_queue_id: queueId, p_clinic_id: clinicId });
+      const { data, error } = await sb.rpc('advance_queue', { p_queue_id: finalQueueId, p_clinic_id: clinicId });
       if (error) return reply(400, { success: false, error: error.message });
       return reply(200, { success: true, data });
     }
@@ -197,11 +211,16 @@ export default async function handler(req, res) {
       return reply(200, { success: true, data });
     }
 
-    if (pathname === '/api/v1/queue/status' && method === 'GET') {
+    // UPDATED: GET /api/v1/queue/status/:id
+    if (pathname.startsWith('/api/v1/queue/status') && method === 'GET') {
+      const parts = pathname.split('/');
+      const idFromPath = parts[parts.length - 1];
       const { patient_id, clinic_id } = query;
+      const finalPatientId = patient_id || (idFromPath !== 'status' ? idFromPath : null);
+      
       let queryBuilder = sb.from('v_queue_live').select('*');
       
-      if (patient_id) queryBuilder = queryBuilder.eq('patient_id', patient_id);
+      if (finalPatientId) queryBuilder = queryBuilder.eq('patient_id', finalPatientId);
       if (clinic_id) queryBuilder = queryBuilder.eq('clinic_id', clinic_id);
       
       const { data, error } = await queryBuilder.maybeSingle();
