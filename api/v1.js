@@ -182,6 +182,15 @@ export default async function handler(req, res) {
       return reply(200, { success: true, data });
     }
 
+    if (pathname === '/api/v1/session/validate' && method === 'POST') {
+      const { token } = body;
+      if (!token) return reply(400, { success: false, error: 'Token is required' });
+
+      const { data, error } = await sb.rpc('validate_session', { p_token: token });
+      if (error) return reply(400, { success: false, error: error.message });
+      return reply(200, { success: true, data });
+    }
+
     if (pathname === '/api/v1/queue/enter' && method === 'POST') {
       const { data, error } = await sb.rpc('enter_unified_queue_safe', body);
       if (error) return reply(400, { success: false, error: error.message });
