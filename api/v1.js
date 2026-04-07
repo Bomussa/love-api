@@ -7,7 +7,7 @@
  * Updated: 2026-04-07
  */
 import { createClient } from '@supabase/supabase-js';
-import { createAdminToken, verifyAdminToken } from '../lib/admin-auth.js';
+import { createAdminToken, verifyAdminBearerToken } from '../lib/admin-auth.js';
 
 // Environment variables
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://rujwuruuosffcxazymit.supabase.co';
@@ -93,7 +93,7 @@ export default async function handler(req, res) {
     if (authHeader && authHeader.startsWith('Bearer ')) {
       const token = authHeader.split(' ')[1];
       try {
-        user = verifyAdminToken(token, ADMIN_AUTH_SECRET);
+        user = verifyAdminBearerToken(token, ADMIN_AUTH_SECRET);
       } catch (e) {
         console.warn('[Auth Warning] Invalid token provided');
       }
@@ -122,6 +122,66 @@ export default async function handler(req, res) {
     // ═══════════════════════════════════════════
     // QUEUE OPERATIONS (Standardized & Resilient)
     // ═══════════════════════════════════════════
+    if (pathname === '/api/v1/queue/call' && method === 'POST') {
+      if (!user || user.role !== 'admin') {
+        return reply(403, { success: false, error: 'Admin access required to call next patient' });
+      }
+      const { clinicId } = body;
+      if (!clinicId) return reply(400, { success: false, error: 'Clinic ID is required' });
+
+      const { data, error } = await sb.rpc('call_next_patient', { p_clinic_id: clinicId });
+      if (error) return reply(400, { success: false, error: error.message });
+      return reply(200, { success: true, data });
+    }
+
+    if (pathname === '/api/v1/queue/start' && method === 'POST') {
+      if (!user || user.role !== 'admin') {
+        return reply(403, { success: false, error: 'Admin access required to start exam' });
+      }
+      const { queueId } = body;
+      if (!queueId) return reply(400, { success: false, error: 'Queue ID is required' });
+
+      const { data, error } = await sb.rpc('start_exam', { p_queue_id: queueId });
+      if (error) return reply(400, { success: false, error: error.message });
+      return reply(200, { success: true, data });
+    }
+
+    if (pathname === '/api/v1/queue/advance' && method === 'POST') {
+      if (!user || user.role !== 'admin') {
+        return reply(403, { success: false, error: 'Admin access required to advance queue' });
+      }
+      const { queueId, clinicId } = body;
+      if (!queueId || !clinicId) return reply(400, { success: false, error: 'Queue ID and Clinic ID are required' });
+
+      const { data, error } = await sb.rpc('advance_queue', { p_queue_id: queueId, p_clinic_id: clinicId });
+      if (error) return reply(400, { success: false, error: error.message });
+      return reply(200, { success: true, data });
+    }
+
+    if (pathname === '/api/v1/queue/done' && method === 'POST') {
+      if (!user || user.role !== 'admin') {
+        return reply(403, { success: false, error: 'Admin access required to mark queue as done' });
+      }
+      const { clinicId, patientId } = body;
+      if (!clinicId || !patientId) return reply(400, { success: false, error: 'Clinic ID and Patient ID are required' });
+
+      const { data, error } = await sb.rpc('queue_done', { p_clinic_id: clinicId, p_patient_id: patientId });
+      if (error) return reply(400, { success: false, error: error.message });
+      return reply(200, { success: true, data });
+    }
+
+    if (pathname === '/api/v1/queue/status' && method === 'PATCH') {
+      if (!user || user.role !== 'admin') {
+        return reply(403, { success: false, error: 'Admin access required to update queue status' });
+      }
+      const { clinicId, patientId, status } = body;
+      if (!clinicId || !patientId || !status) return reply(400, { success: false, error: 'Clinic ID, Patient ID, and Status are required' });
+
+      const { data, error } = await sb.rpc('update_queue_status', { p_clinic_id: clinicId, p_patient_id: patientId, p_status: status });
+      if (error) return reply(400, { success: false, error: error.message });
+      return reply(200, { success: true, data });
+    }
+
     if (pathname === '/api/v1/queue/enter' && method === 'POST') {
       const { data, error } = await sb.rpc('enter_unified_queue_safe', body);
       if (error) return reply(400, { success: false, error: error.message });
