@@ -1,4 +1,4 @@
-import fetch from 'node-fetch';
+const fetchApi = globalThis.fetch;
 
 const BASE = 'http://localhost:3000/api/v1';
 
@@ -8,13 +8,13 @@ async function test() {
   try {
     // 1. Health
     console.log('Testing Health...');
-    let res = await fetch(`${BASE}/health`);
+    let res = await fetchApi(`${BASE}/health`);
     let json = await res.json();
     console.log('Health:', json);
 
     // 2. Login
     console.log('Testing Login...');
-    res = await fetch(`${BASE}/patient/login`, {
+    res = await fetchApi(`${BASE}/patient/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -35,7 +35,7 @@ async function test() {
 
     // 3. Create Queue
     console.log(`Testing Queue Create for clinic: ${firstClinic}...`);
-    res = await fetch(`${BASE}/queue/create`, {
+    res = await fetchApi(`${BASE}/queue/create`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -48,13 +48,13 @@ async function test() {
 
     // 4. Status
     console.log(`Testing Status for clinic: ${firstClinic}...`);
-    res = await fetch(`${BASE}/queue/status?clinic_id=${firstClinic}`);
+    res = await fetchApi(`${BASE}/queue/status?clinic_id=${firstClinic}`);
     json = await res.json();
     console.log('Status:', json);
 
     // 5. Call
     console.log(`Testing Call for clinic: ${firstClinic}...`);
-    res = await fetch(`${BASE}/queue/call`, {
+    res = await fetchApi(`${BASE}/queue/call`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ clinic_id: firstClinic })
@@ -65,7 +65,7 @@ async function test() {
     // 6. Done
     if (json.success && json.data && json.data.id) {
       console.log(`Testing Done for queue ID: ${json.data.id}...`);
-      res = await fetch(`${BASE}/queue/done`, {
+      res = await fetchApi(`${BASE}/queue/done`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: json.data.id })
