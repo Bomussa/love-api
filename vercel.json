@@ -1,21 +1,26 @@
 {
   "version": 2,
-  "headers": [
+  "functions": {
+    "api/v1.js": {
+      "maxDuration": 30
+    }
+  },
+  "redirects": [
     {
-      "source": "/api/(.*)",
-      "headers": [
-        { "key": "Access-Control-Allow-Origin", "value": "*" },
-        { "key": "Access-Control-Allow-Methods", "value": "GET, POST, PUT, PATCH, DELETE, OPTIONS" },
-        { "key": "Access-Control-Allow-Headers", "value": "Content-Type, Authorization" },
-        { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
-      ]
+      "source": "/api/(?!v1)(.*)",
+      "destination": "/api/v1/$1",
+      "permanent": true
+    },
+    {
+      "source": "https://www.mmc-mms.com/(.*)",
+      "destination": "https://mmc-mms.com/$1",
+      "permanent": true
     }
   ],
   "rewrites": [
-    { "source": "/api/health", "destination": "/api/health.js" },
-    { "source": "/api/v1/health", "destination": "/api/v1.js" },
-    { "source": "/api/v1/status", "destination": "/api/v1.js" },
-    { "source": "/api/v1/qa/deep_run", "destination": "/api/v1.js" },
-    { "source": "/api/v1/(.*)", "destination": "/api/v1.js" }
+    {
+      "source": "/api/v1/:path*",
+      "destination": "/api/v1.js"
+    }
   ]
 }
