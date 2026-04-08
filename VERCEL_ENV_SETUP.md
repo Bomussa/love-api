@@ -1,71 +1,84 @@
-# Vercel Environment Variables Setup
+# Vercel Environment Variables Setup (love-api + frontend connectivity)
 
-## Required Environment Variables for Vercel
+## الهدف
+ضمان أن الفرونت متصل دائمًا بالباك اند مع تقليل الانقطاع عبر إعداد بيئة صحيح + إعدادات اعتمادية موحدة.
 
-To deploy the `love-api` project on Vercel, you must set the following variables in Project Settings → Environment Variables.
+---
 
-## Required variables in every environment
+## 1) متغيرات أساسية مطلوبة على مشروع `love-api` في Vercel
 
-Set these in **Production**, **Preview**, and **Development**:
+اضبطها في **Production + Preview + Development**:
 
 ```bash
 SUPABASE_URL=https://rujwuruuosffcxazymit.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=<your-supabase-service-role-key>
+SUPABASE_SERVICE_ROLE=<service-role-key>
 ```
 
-> Runtime validation will fail fast if either `SUPABASE_URL` or `SUPABASE_SERVICE_ROLE_KEY` is missing.
+> يدعم الكود أيضًا fallback إلى `SUPABASE_ANON_KEY`، لكن الإنتاج يجب أن يعتمد `SUPABASE_SERVICE_ROLE` على السيرفر فقط.
 
-## Optional variables (defaults are applied by the app)
+---
+
+## 2) متغيرات frontend المطلوبة (مشروع love)
 
 ```bash
-API_TIMEOUT=30000
-API_RETRY_ATTEMPTS=3
-API_RETRY_DELAY=1000
-CACHE_ENABLED=true
-CACHE_TTL=300
-MAINTENANCE_MODE=false
-NODE_ENV=production
-LOG_LEVEL=info
-CORS_ORIGIN=*
-FEATURE_SSE_ENABLED=true
-FEATURE_ADAPTIVE_POLLING=true
-FEATURE_CIRCUIT_BREAKER=true
+NEXT_PUBLIC_API_BASE_URL=https://mmc-mms.com/api/v1
+NEXT_PUBLIC_API_TIMEOUT_MS=12000
+NEXT_PUBLIC_HEALTHCHECK_INTERVAL_MS=30000
+NEXT_PUBLIC_RETRY_MAX=3
+NEXT_PUBLIC_RETRY_BACKOFF_MS=500
 ```
 
-## Environment mapping checklist
+### إعدادات الدومين
+- يجب أن يكون `mmc-mms.com` و `www.mmc-mms.com` على نفس المحتوى.
+- أي redirect يجب أن يكون 301 ثابتًا ومنضبطًا (بدون loop).
 
-- **Production**
-  - `SUPABASE_URL`: production Supabase project URL
-  - `SUPABASE_SERVICE_ROLE_KEY`: production service role key
-- **Preview**
-  - `SUPABASE_URL`: preview/staging Supabase URL (or production if intentionally shared)
-  - `SUPABASE_SERVICE_ROLE_KEY`: matching preview/staging service key
-- **Development**
-  - `SUPABASE_URL`: development/local Supabase URL
-  - `SUPABASE_SERVICE_ROLE_KEY`: matching development service key
+---
 
-## Steps to Set Environment Variables on Vercel
+## 3) سياسات اتصال تمنع الانقطاع
 
-1. Go to your Vercel project dashboard.
-2. Click **Settings**.
-3. Navigate to **Environment Variables**.
-4. Add each variable with its value.
-5. Select target environments (**Production**, **Preview**, **Development**).
-6. Click **Save**.
-7. Redeploy your project.
+### Timeout
+- GET: `8000ms`
+- POST/PUT/PATCH/DELETE: `12000ms`
 
-## Verification
+### Retry
+- retries على network/5xx فقط
+- لا retries على 4xx
+- exponential backoff: `500ms`, `1000ms`, `2000ms`
 
-After setting the variables:
+### Circuit breaker
+- إذا تكرر الفشل 5 مرات/60 ثانية:
+  - إيقاف عمليات mutation مؤقتًا لمدة 30 ثانية
+  - الاستمرار على `/health` فقط
 
-1. Open health endpoint: `https://your-vercel-domain.vercel.app/api/v1/health`
-2. Run deep QA endpoint: `https://your-vercel-domain.vercel.app/api/v1/qa/deep_run`
+### Fallback UX
+- إظهار حالة "جاري إعادة الاتصال"
+- cache آخر بيانات قراءة إن أمكن
+- زر "إعادة المحاولة" يدويًا
 
-Both should return successful responses.
+---
 
-## Important Notes
+## 4) خطوات الإعداد على Vercel
 
-- Never commit sensitive keys to the repository.
-- Keep `SUPABASE_SERVICE_ROLE_KEY` secret and server-side only.
-- Use `.env.example` as a local template.
-- Rotate keys periodically or immediately if exposure is suspected.
+1. افتح مشروع `love-api` في Vercel.
+2. Settings → Environment Variables.
+3. أضف المتغيرات المذكورة أعلاه.
+4. كرر العملية لمشروع `love` frontend بمتغيرات `NEXT_PUBLIC_*`.
+5. نفّذ Redeploy للمشروعين.
+
+---
+
+## 5) تحقق بعد النشر (Production Verification)
+
+- `GET https://mmc-mms.com/api/v1/health`
+- `GET https://www.mmc-mms.com/api/v1/health`
+- `GET https://mmc-mms.com/api/v1/qa/deep_run`
+
+يجب أن تكون النتيجة `success: true` ووقت استجابة مستقر.
+
+---
+
+## 6) أمان
+
+- لا تضع `SUPABASE_SERVICE_ROLE` في الفرونت أو في `NEXT_PUBLIC_*`.
+- لا ترفع secrets إلى GitHub.
+- فعّل key rotation دوريًا.
