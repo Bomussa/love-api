@@ -34,6 +34,40 @@ function getTodayDate() {
   return getQatarTime().split('T')[0];
 }
 
+export async function invokeRpcSafe(supabaseClient, fnName, params = {}) {
+  try {
+    const { data, error } = await supabaseClient.rpc(fnName, params);
+    if (error) {
+      const missing = error.code === '42883' || /does not exist/i.test(error.message || '');
+      return { ok: false, missing, error };
+    }
+    return { ok: true, data };
+  } catch (error) {
+    const missing = error?.code === '42883' || /does not exist/i.test(error?.message || '');
+    return { ok: false, missing, error };
+  }
+}
+
+export function getNextClinicInRoute({ examType, gender, currentClinicId }) {
+  const routeKey = `${String(examType || '').toLowerCase()}:${String(gender || '').toLowerCase()}`;
+  const ROUTES = {
+    'recruitment:male': ['XR', 'EYE', 'EENT', 'DNT'],
+    'recruitment:female': ['XR', 'EYE', 'EENT', 'DNT'],
+    'general:male': ['XR', 'EYE'],
+    'general:female': ['XR', 'EYE'],
+  };
+  const route = ROUTES[routeKey] || [];
+  if (!route.length) {
+    return { nextClinicId: null, finished: true, route: [] };
+  }
+  const idx = route.indexOf(currentClinicId);
+  if (idx === -1) {
+    return { nextClinicId: route[0] || null, finished: false, route };
+  }
+  const nextClinicId = route[idx + 1] || null;
+  return { nextClinicId, finished: !nextClinicId, route };
+}
+
 // ============================================================================
 // MAIN HANDLER
 // ============================================================================
@@ -174,6 +208,25 @@ export default async function handler(req, res) {
 
       if (error) throw error;
       return res.status(200).json({ success: true, data });
+    }
+
+    if (url.includes('/queue/advance') && method === 'POST') {
+      const { queueId, id } = body;
+      const targetId = queueId || id;
+      if (!targetId) return res.status(400).json({ success: false, error: 'queueId is required' });
+
+      const { data, error } = await supabase
+        .from('queues')
+        .update({ 
+          status: QUEUE_STATUS.DONE,
+          completed_at: getQatarTime()
+        })
+        .eq('id', targetId)
+        .select()
+        .single();
+
+      if (error) throw error;
+      return res.status(200).json({ success: true, data, nextClinicId: null });
     }
 
     // 7. DOCTOR ACTION: DONE
