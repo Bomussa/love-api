@@ -50,20 +50,26 @@ export async function invokeRpcSafe(supabaseClient, fnName, params = {}) {
 
 export function getNextClinicInRoute({ examType, gender, currentClinicId }) {
   const routeKey = `${String(examType || '').toLowerCase()}:${String(gender || '').toLowerCase()}`;
+  
+  // Define official routes
   const ROUTES = {
-    'recruitment:male': ['XR', 'EYE', 'EENT', 'DNT'],
-    'recruitment:female': ['XR', 'EYE', 'EENT', 'DNT'],
-    'general:male': ['XR', 'EYE'],
-    'general:female': ['XR', 'EYE'],
+    'recruitment:male': ['BIO', 'ECG', 'AUD', 'XR', 'EYE', 'ENT', 'DNT', 'LAB'],
+    'recruitment:female': ['BIO', 'ECG', 'AUD', 'XR', 'EYE', 'ENT', 'DNT', 'LAB'],
+    'general:male': ['BIO', 'XR', 'EYE'],
+    'general:female': ['BIO', 'XR', 'EYE'],
   };
+
   const route = ROUTES[routeKey] || [];
   if (!route.length) {
     return { nextClinicId: null, finished: true, route: [] };
   }
+
   const idx = route.indexOf(currentClinicId);
   if (idx === -1) {
+    // If not in route, start from beginning
     return { nextClinicId: route[0] || null, finished: false, route };
   }
+
   const nextClinicId = route[idx + 1] || null;
   return { nextClinicId, finished: !nextClinicId, route };
 }
@@ -211,22 +217,53 @@ export default async function handler(req, res) {
     }
 
     if (url.includes('/queue/advance') && method === 'POST') {
-      const { queueId, id } = body;
-      const targetId = queueId || id;
-      if (!targetId) return res.status(400).json({ success: false, error: 'queueId is required' });
+      const { queueId, clinicId } = body;
+      if (!queueId) return res.status(400).json({ success: false, error: 'queueId is required' });
 
-      const { data, error } = await supabase
+      // 1. Get current queue record
+      const { data: current, error: getError } = await supabase
+        .from('queues')
+        .select('*')
+        .eq('id', queueId)
+        .single();
+
+      if (getError || !current) throw getError || new Error('Queue record not found');
+
+      // 2. Mark current as DONE
+      await supabase
         .from('queues')
         .update({ 
           status: QUEUE_STATUS.DONE,
           completed_at: getQatarTime()
         })
-        .eq('id', targetId)
-        .select()
-        .single();
+        .eq('id', queueId);
 
-      if (error) throw error;
-      return res.status(200).json({ success: true, data, nextClinicId: null });
+      // 3. Calculate next clinic
+      const { nextClinicId, finished } = getNextClinicInRoute({
+        examType: current.exam_type,
+        gender: current.gender || 'male',
+        currentClinicId: clinicId || current.clinic_id
+      });
+
+      // 4. If not finished, create new entry in next clinic
+      let nextEntry = null;
+      if (!finished && nextClinicId) {
+        const { data: created, error: createError } = await supabase.rpc('enter_unified_queue_v2', {
+          p_clinic_id: nextClinicId,
+          p_patient_id: current.patient_id,
+          p_patient_name: current.patient_name,
+          p_exam_type: current.exam_type,
+          p_date: getTodayDate()
+        });
+        if (!createError) nextEntry = created;
+      }
+
+      return res.status(200).json({ 
+        success: true, 
+        finished, 
+        nextClinicId,
+        nextEntry
+      });
     }
 
     // 7. DOCTOR ACTION: DONE
