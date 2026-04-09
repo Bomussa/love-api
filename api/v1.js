@@ -12,67 +12,26 @@ const corsHeaders = {
 };
 
 // ============================================================================
-// CONSTANTS & UTILITIES (EXPORTED)
+// CONSTANTS & UTILITIES (FINAL CONTRACT)
 // ============================================================================
 
 export const QUEUE_STATUS = {
   WAITING: "WAITING",
-  SERVING: "SERVING",
-  COMPLETED: "COMPLETED",
+  CALLED: "CALLED",
+  IN_PROGRESS: "IN_PROGRESS",
   DONE: "DONE",
 };
 
-export async function invokeRpcSafe(client, fn, params) {
-  try {
-    const { data, error } = await client.rpc(fn, params);
-    if (error) {
-      if (error.code === '42883' || error.message?.includes('does not exist')) {
-        return { ok: false, missing: true, error: error.message };
-      }
-      throw error;
-    }
-    return data;
-  } catch (err) {
-    if (err.message?.includes('does not exist')) {
-      return { ok: false, missing: true, error: err.message };
-    }
-    throw err;
-  }
+// Helper to get current time in Qatar
+function getQatarTime() {
+  const now = new Date();
+  const qatarOffset = 3 * 60; // UTC+3
+  const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
+  return new Date(utc + (qatarOffset * 60000)).toISOString();
 }
 
-export function getNextClinicInRoute(params, currentClinicIdInput) {
-  // Handle both old and new signature for compatibility
-  let examType, gender, currentClinicId;
-  
-  if (typeof params === 'object' && !Array.isArray(params)) {
-    examType = params.examType;
-    gender = params.gender;
-    currentClinicId = params.currentClinicId;
-  } else {
-    // Legacy support if needed
-    return null;
-  }
-
-  // Define routes based on test expectations
-  const routes = {
-    'recruitment': {
-      'male': ['XR', 'EYE', 'DNT'],
-      'female': ['XR', 'EYE', 'DNT']
-    }
-  };
-
-  const path = routes[examType]?.[gender] || [];
-  const index = path.indexOf(currentClinicId);
-  
-  if (index === -1) {
-    return { nextClinicId: null, finished: false };
-  }
-
-  const nextClinicId = path[index + 1] || null;
-  return {
-    nextClinicId,
-    finished: nextClinicId === null
-  };
+function getTodayDate() {
+  return getQatarTime().split('T')[0];
 }
 
 // ============================================================================
@@ -85,9 +44,13 @@ export default async function handler(req, res) {
     return res.status(200).set(corsHeaders).end();
   }
 
+  // Set default CORS headers for all responses
+  Object.entries(corsHeaders).forEach(([key, value]) => res.setHeader(key, value));
+
   const url = req.url;
   const method = req.method;
   const body = req.body || {};
+  const query = req.query || {};
 
   try {
     // 1. HEALTH & STATUS
@@ -95,8 +58,8 @@ export default async function handler(req, res) {
       return res.status(200).json({
         status: 'ok',
         service: 'love-api',
-        version: 'v1.1.0',
-        timestamp: new Date().toISOString(),
+        version: 'v2.0.0-production',
+        timestamp: getQatarTime(),
         timezone: 'Asia/Qatar'
       });
     }
@@ -104,23 +67,17 @@ export default async function handler(req, res) {
     // 2. PATIENT LOGIN
     if (url.includes('/patient/login') && method === 'POST') {
       const { personalId, gender } = body;
+      if (!personalId) return res.status(400).json({ success: false, error: 'personalId is required' });
+      
+      // Simple login simulation or DB check
       return res.status(200).json({
         success: true,
-        data: { id: personalId, gender, name: `Patient ${personalId}` }
-      });
-    }
-
-    // 2.1 COMPATIBILITY: POST /api/v1/patient/login (alias)
-    if (url.startsWith("/api/v1/patient/login") && method === "POST") {
-      const { personalId, gender } = body;
-      return res.status(200).json({
-        success: true,
-        data: { id: personalId, gender, name: `Patient ${personalId}` }
+        data: { id: personalId, gender: gender || 'male', name: `Patient ${personalId}` }
       });
     }
 
     // 3. QUEUE ENTER
-    if (url.includes('/queue/enter') && method === 'POST') {
+    if ((url.includes('/queue/enter') || url.includes('/queue/create')) && method === 'POST') {
       const clinic_id = body.clinic_id || body.clinicId;
       const patient_id = body.patient_id || body.patientId;
       const exam_type = body.exam_type || body.examType || 'general';
@@ -130,11 +87,13 @@ export default async function handler(req, res) {
         return res.status(400).json({ success: false, error: 'clinic_id and patient_id are required' });
       }
 
-      const { data, error } = await supabase.rpc('enter_unified_queue_safe', {
+      // Use RPC for atomic sequential numbering
+      const { data, error } = await supabase.rpc('enter_unified_queue_v2', {
         p_clinic_id: clinic_id,
         p_patient_id: patient_id,
         p_patient_name: patient_name,
-        p_exam_type: exam_type
+        p_exam_type: exam_type,
+        p_date: getTodayDate()
       });
 
       if (error) throw error;
@@ -142,122 +101,106 @@ export default async function handler(req, res) {
       return res.status(200).json({
         success: true,
         data: {
-          clinic_id: data.clinic,
-          patient_id: data.user,
-          position: data.number,
+          id: data.id,
+          clinic_id: data.clinic_id,
+          patient_id: data.patient_id,
+          position: data.queue_number,
           status: data.status,
-          message: data.message || 'Entered queue successfully'
+          created_at: data.created_at
         }
       });
     }
 
-    // 3.1 COMPATIBILITY: POST /api/v1/queue/create
-    if (url.startsWith("/api/v1/queue/create") && method === "POST") {
-      const clinic_id = body.clinic_id || body.clinicId;
-      const patient_id = body.patient_id || body.patientId;
-      const exam_type = body.exam_type || body.examType || 'general';
-      const patient_name = body.patient_name || `Patient ${patient_id}`;
+    // 4. QUEUE STATUS & STATS
+    if (url.includes('/queue/status') || url.includes('/queue/stats')) {
+      const clinicId = query.clinicId || query.clinic_id;
+      if (!clinicId) return res.status(400).json({ success: false, error: 'clinicId is required' });
 
-      if (!clinic_id || !patient_id) {
-        return res.status(400).json({ success: false, error: 'clinic_id and patient_id are required' });
-      }
-
-      const { data, error } = await supabase.rpc('enter_unified_queue_safe', {
-        p_clinic_id: clinic_id,
-        p_patient_id: patient_id,
-        p_patient_name: patient_name,
-        p_exam_type: exam_type
-      });
+      const { data, error } = await supabase
+        .from('queues')
+        .select('*')
+        .eq('clinic_id', clinicId)
+        .eq('queue_date', getTodayDate())
+        .order('display_number', { ascending: true });
 
       if (error) throw error;
 
-      return res.status(200).json({
-        success: true,
-        data: {
-          clinic_id: data.clinic,
-          patient_id: data.user,
-          position: data.number,
-          status: data.status,
-          message: data.message || 'Queue created successfully'
-        }
-      });
-    }
-
-    // 4. QUEUE STATUS
-    if (url.includes('/queue/status')) {
-      const parts = url.split('/');
-      const id = parts[parts.length - 1].split('?')[0];
-      const clinic_id = req.query.clinic_id;
-
-      let query = supabase.from('queues').select('*');
-      
-      if (clinic_id) {
-        query = query.eq('clinic_id', clinic_id);
-      }
-      
-      if (id && id !== 'status') {
-        query = query.or(`id.eq.${id},patient_id.eq.${id}`);
-      }
-
-      const { data, error } = await query.order('created_at', { ascending: false });
-
-      if (error) throw error;
+      const stats = {
+        total: data.length,
+        waiting: data.filter(r => r.status === QUEUE_STATUS.WAITING).length,
+        called: data.filter(r => r.status === QUEUE_STATUS.CALLED).length,
+        serving: data.filter(r => r.status === QUEUE_STATUS.IN_PROGRESS).length,
+        completed: data.filter(r => r.status === QUEUE_STATUS.DONE).length
+      };
 
       return res.status(200).json({
         success: true,
         queue: data,
-        stats: {
-          totalWaiting: data.filter(r => r.status === 'WAITING').length,
-          totalIn: data.filter(r => ['CALLED', 'SERVING'].includes(r.status)).length,
-          totalDone: data.filter(r => r.status === 'COMPLETED' || r.status === 'DONE').length
-        }
+        stats: stats
       });
     }
 
-    // 5. DOCTOR CONTROLS (Call Next)
+    // 5. DOCTOR ACTION: CALL NEXT
     if (url.includes('/queue/call') && method === 'POST') {
-      const { clinicId } = body;
-      const { data, error } = await supabase.rpc('call_next_patient', {
-        p_clinic_id: clinicId
+      const clinicId = body.clinicId || body.clinic_id;
+      if (!clinicId) return res.status(400).json({ success: false, error: 'clinicId is required' });
+
+      const { data, error } = await supabase.rpc('call_next_patient_v2', {
+        p_clinic_id: clinicId,
+        p_date: getTodayDate()
       });
 
       if (error) throw error;
+      if (!data) return res.status(200).json({ success: false, message: 'No patients waiting' });
 
       return res.status(200).json({ success: true, data });
     }
 
-    // 6. DOCTOR CONTROLS (Done)
-    if (url.includes('/queue/done') && method === 'POST') {
-      const { clinicId, patientId } = body;
+    // 6. DOCTOR ACTION: START EXAM
+    if (url.includes('/queue/start') && method === 'POST') {
+      const { queueId } = body;
+      if (!queueId) return res.status(400).json({ success: false, error: 'queueId is required' });
+
       const { data, error } = await supabase
         .from('queues')
-        .update({ status: 'COMPLETED', completed_at: new Date().toISOString() })
-        .eq('clinic_id', clinicId)
-        .eq('patient_id', patientId)
-        .eq('status', 'SERVING')
+        .update({ 
+          status: QUEUE_STATUS.IN_PROGRESS,
+          started_at: getQatarTime()
+        })
+        .eq('id', queueId)
+        .eq('status', QUEUE_STATUS.CALLED)
         .select()
         .single();
 
       if (error) throw error;
-
       return res.status(200).json({ success: true, data });
     }
 
-    // 7. CLINICS
+    // 7. DOCTOR ACTION: DONE
+    if (url.includes('/queue/done') && method === 'POST') {
+      const { queueId, id } = body;
+      const targetId = queueId || id;
+      if (!targetId) return res.status(400).json({ success: false, error: 'queueId is required' });
+
+      const { data, error } = await supabase
+        .from('queues')
+        .update({ 
+          status: QUEUE_STATUS.DONE,
+          completed_at: getQatarTime()
+        })
+        .eq('id', targetId)
+        .select()
+        .single();
+
+      if (error) throw error;
+      return res.status(200).json({ success: true, data });
+    }
+
+    // 8. CLINICS
     if (url.includes('/clinics') && method === 'GET') {
       const { data, error } = await supabase.from('clinics').select('*').eq('is_active', true);
       if (error) throw error;
       return res.status(200).json(data);
-    }
-
-    // 8. ADMINS ENDPOINT
-    if (url.startsWith("/api/v1/admins")) {
-      return res.status(200).json({ ok: true, message: "Admins endpoint", data: [] });
-    }
-
-    // 9. QA DEEP RUN ENDPOINT
-    if (url.startsWith("/api/v1/qa/deep_run")) {
-      return res.status(200).json({ ok: true, message: "QA deep run endpoint", status: "ready" });
     }
 
     // Default 404
@@ -267,8 +210,7 @@ export default async function handler(req, res) {
     console.error(`[API Error] ${url}:`, err);
     return res.status(500).json({ 
       success: false, 
-      error: err.message,
-      details: err.details || null
+      error: err.message
     });
   }
 }
