@@ -34,20 +34,6 @@ function getTodayDate() {
   return getQatarTime().split('T')[0];
 }
 
-export async function invokeRpcSafe(supabaseClient, fnName, params = {}) {
-  try {
-    const { data, error } = await supabaseClient.rpc(fnName, params);
-    if (error) {
-      const missing = error.code === '42883' || /does not exist/i.test(error.message || '');
-      return { ok: false, missing, error };
-    }
-    return { ok: true, data };
-  } catch (error) {
-    const missing = error?.code === '42883' || /does not exist/i.test(error?.message || '');
-    return { ok: false, missing, error };
-  }
-}
-
 export function getNextClinicInRoute({ examType, gender, currentClinicId }) {
   const routeKey = `${String(examType || '').toLowerCase()}:${String(gender || '').toLowerCase()}`;
   
@@ -98,34 +84,83 @@ export default async function handler(req, res) {
       return res.status(200).json({
         status: 'ok',
         service: 'love-api',
-        version: 'v2.0.0-production',
+        version: 'v2.2.0-production',
         timestamp: getQatarTime(),
         timezone: 'Asia/Qatar'
       });
     }
 
-    // 2. PATIENT LOGIN
+    // 2. PATIENT LOGIN (PERSISTENT RECORDS)
     if (url.includes('/patient/login') && method === 'POST') {
-      const { personalId, gender } = body;
+      const { personalId, gender, name } = body;
       if (!personalId) return res.status(400).json({ success: false, error: 'personalId is required' });
       
-      // Simple login simulation or DB check
+      // Check if patient exists
+      let { data: patient, error: findError } = await supabase
+        .from('patients')
+        .select('*')
+        .eq('personal_id', personalId)
+        .single();
+
+      if (findError && findError.code !== 'PGRST116') throw findError;
+
+      if (!patient) {
+        // Create new patient record
+        const { data: newPatient, error: createError } = await supabase
+          .from('patients')
+          .insert({
+            personal_id: personalId,
+            gender: gender || 'male',
+            name: name || `Patient ${personalId}`,
+            created_at: getQatarTime()
+          })
+          .select()
+          .single();
+        if (createError) throw createError;
+        patient = newPatient;
+      }
+
       return res.status(200).json({
         success: true,
-        data: { id: personalId, gender: gender || 'male', name: `Patient ${personalId}` }
+        data: patient
       });
     }
 
-    // 3. QUEUE ENTER
+    // 3. QUEUE ENTER (WEIGHTED DYNAMIC START)
     if ((url.includes('/queue/enter') || url.includes('/queue/create')) && method === 'POST') {
-      const clinic_id = body.clinic_id || body.clinicId;
+      let clinic_id = body.clinic_id || body.clinicId;
       const patient_id = body.patient_id || body.patientId;
       const exam_type = body.exam_type || body.examType || 'general';
       const patient_name = body.patient_name || `Patient ${patient_id}`;
+      const gender = body.gender || 'male';
 
-      if (!clinic_id || !patient_id) {
-        return res.status(400).json({ success: false, error: 'clinic_id and patient_id are required' });
+      if (!patient_id) {
+        return res.status(400).json({ success: false, error: 'patient_id is required' });
       }
+
+      // If no clinic_id provided, find the least loaded clinic in the route (Weighted Start)
+      if (!clinic_id) {
+        const { route } = getNextClinicInRoute({ examType: exam_type, gender });
+        if (route && route.length > 0) {
+          // Get current waiting counts for all clinics in route
+          const { data: counts } = await supabase
+            .from('queues')
+            .select('clinic_id')
+            .in('clinic_id', route)
+            .eq('queue_date', getTodayDate())
+            .eq('status', QUEUE_STATUS.WAITING);
+          
+          const clinicLoads = route.map(cid => ({
+            id: cid,
+            count: (counts || []).filter(c => c.clinic_id === cid).length
+          }));
+          
+          // Pick the one with minimum load
+          clinic_id = clinicLoads.reduce((prev, curr) => prev.count <= curr.count ? prev : curr).id;
+        }
+      }
+
+      if (!clinic_id) return res.status(400).json({ success: false, error: 'Could not determine clinic' });
 
       // Use RPC for atomic sequential numbering
       const { data, error } = await supabase.rpc('enter_unified_queue_v2', {
@@ -137,18 +172,7 @@ export default async function handler(req, res) {
       });
 
       if (error) throw error;
-
-      return res.status(200).json({
-        success: true,
-        data: {
-          id: data.id,
-          clinic_id: data.clinic_id,
-          patient_id: data.patient_id,
-          position: data.queue_number,
-          status: data.status,
-          created_at: data.created_at
-        }
-      });
+      return res.status(200).json({ success: true, data });
     }
 
     // 4. QUEUE STATUS & STATS
@@ -208,7 +232,6 @@ export default async function handler(req, res) {
           started_at: getQatarTime()
         })
         .eq('id', queueId)
-        .eq('status', QUEUE_STATUS.CALLED)
         .select()
         .single();
 
@@ -216,6 +239,7 @@ export default async function handler(req, res) {
       return res.status(200).json({ success: true, data });
     }
 
+    // 7. DOCTOR ACTION: ADVANCE (DYNAMIC PATHWAY)
     if (url.includes('/queue/advance') && method === 'POST') {
       const { queueId, clinicId } = body;
       if (!queueId) return res.status(400).json({ success: false, error: 'queueId is required' });
@@ -266,11 +290,10 @@ export default async function handler(req, res) {
       });
     }
 
-    // 7. DOCTOR ACTION: DONE
+    // 8. DOCTOR ACTION: DONE (FINAL)
     if (url.includes('/queue/done') && method === 'POST') {
-      const { queueId, id } = body;
-      const targetId = queueId || id;
-      if (!targetId) return res.status(400).json({ success: false, error: 'queueId is required' });
+      const { queueId } = body;
+      if (!queueId) return res.status(400).json({ success: false, error: 'queueId is required' });
 
       const { data, error } = await supabase
         .from('queues')
@@ -278,7 +301,7 @@ export default async function handler(req, res) {
           status: QUEUE_STATUS.DONE,
           completed_at: getQatarTime()
         })
-        .eq('id', targetId)
+        .eq('id', queueId)
         .select()
         .single();
 
@@ -286,21 +309,40 @@ export default async function handler(req, res) {
       return res.status(200).json({ success: true, data });
     }
 
-    // 8. CLINICS
+    // 9. CLINICS LIST
     if (url.includes('/clinics') && method === 'GET') {
-      const { data, error } = await supabase.from('clinics').select('*').eq('is_active', true);
+      const { data, error } = await supabase
+        .from('clinics')
+        .select('*')
+        .eq('is_active', true)
+        .order('name', { ascending: true });
+
       if (error) throw error;
-      return res.status(200).json(data);
+      return res.status(200).json({ success: true, data });
     }
 
-    // Default 404
-    return res.status(404).json({ error: 'Endpoint not found', path: url });
+    // 10. ADMIN LOGIN
+    if (url.includes('/admin/login') && method === 'POST') {
+      const { username, password } = body;
+      // Basic check - in production use proper auth
+      if (username === 'admin' && password === 'password') {
+        return res.status(200).json({
+          success: true,
+          token: 'admin-token-' + Date.now(),
+          expiresAt: new Date(Date.now() + 86400000).toISOString()
+        });
+      }
+      return res.status(401).json({ success: false, error: 'Invalid credentials' });
+    }
+
+    return res.status(404).json({ success: false, error: 'Endpoint not found' });
 
   } catch (err) {
-    console.error(`[API Error] ${url}:`, err);
-    return res.status(500).json({ 
-      success: false, 
-      error: err.message
+    console.error('API Error:', err);
+    return res.status(500).json({
+      success: false,
+      error: err.message || 'Internal server error',
+      code: err.code
     });
   }
 }
