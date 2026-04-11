@@ -136,7 +136,6 @@ class Storage {
   }
 }
 
-// إنشاء namespaces - ⚠️ KV_PINS deprecated: PIN system permanently removed
 export const KV_ADMIN = new Storage('admin');
 export const KV_QUEUES = new Storage('queues');
 export const KV_EVENTS = new Storage('events');

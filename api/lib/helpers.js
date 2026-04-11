@@ -23,7 +23,6 @@ export function generateUniqueNumber() {
   return parseInt(`${timestamp}${random}`);
 }
 
-// PIN system permanently removed - function deleted
 
 // Validate Patient ID
 export function validatePatientId(patientId) {
