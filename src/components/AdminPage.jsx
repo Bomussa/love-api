@@ -1,216 +1,63 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useEffect, useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from './Card'
 import { Button } from './Button'
-import { Input } from './Input'
-import { EnhancedAdminDashboard } from './EnhancedAdminDashboard'
-import { ClinicsConfiguration } from './ClinicsConfiguration'
-import { SystemSettingsPanel } from './SystemSettingsPanel'
+import { DoctorManagement } from './ClinicsConfiguration'
 import {
   BarChart3,
-  Users,
-  Settings,
-  FileText,
-  Lock,
+  Building2,
+  Globe,
   Home,
   LogOut,
+  PhoneCall,
+  RefreshCw,
+  Users,
   Clock,
   CheckCircle,
-  Activity,
-  Download,
-  RefreshCw,
-  Play,
-  Pause,
-  Globe
+  Stethoscope
 } from 'lucide-react'
-import { themes } from '../lib/utils'
-import { enhancedMedicalThemes } from '../lib/enhanced-themes'
-import eventBus from '../core/event-bus'
-import { t } from '../lib/i18n'
 import api from '../lib/api'
 
-export function AdminPage({ onLogout, language, toggleLanguage, currentTheme, onThemeChange }) {
+/**
+ * Simplified administrator workspace.
+ *
+ * Only the allowed production screens remain: dashboard, queue management, and
+ * doctor management.
+ */
+export function AdminPage({ session, onLogout, language, toggleLanguage }) {
   const [currentView, setCurrentView] = useState('dashboard')
-  const [stats, setStats] = useState(null)
-  const [activePins, setActivePins] = useState([])
-  const [loading, setLoading] = useState(false)
-  const [adminCode] = useState('BOMUSSA14490')
-  const [queues, setQueues] = useState([])
-  const [recentReports, setRecentReports] = useState([])
+  const [dashboard, setDashboard] = useState(null)
+  const [busyKey, setBusyKey] = useState('')
+  const [feedback, setFeedback] = useState(null)
 
-  // مرجع للاحتفاظ بكائن SSE
-  const sseRef = useRef(null)
-  const pollingIntervalRef = useRef(null)
-  
+  const showFeedback = (message, tone = 'success') => {
+    setFeedback({ message, tone })
+    window.setTimeout(() => setFeedback(null), 2500)
+  }
+
+  const loadDashboard = async () => {
+    const nextDashboard = await api.getAdminDashboard(session.token)
+    setDashboard(nextDashboard)
+  }
+
   useEffect(() => {
-    loadStats()
-    loadActivePins()
-    loadQueues()
-    loadRecentReports()
-    
-    // تفعيل SSE للتحديث اللحظي
-    if (sseRef.current) sseRef.current.close()
-    sseRef.current = api.connectSSE('admin', (event) => {
-      if (event.type === 'queue_update' && event.data) {
-        if (event.data.stats) setStats(event.data)
-        if (event.data.queues) setQueues(event.data.queues)
-      }
-      if (event.type === 'stats_update' && event.data) {
-        setStats(event.data)
-      }
+    loadDashboard().catch((error) => showFeedback(error.message, 'error'))
+
+    const subscription = api.subscribeToQueue({}, () => {
+      loadDashboard().catch(() => {})
     })
-    
-    // Adaptive Polling: يعمل فقط إذا SSE غير نشط
-    const handleSSEConnected = () => {
 
-      if (pollingIntervalRef.current) {
-        clearInterval(pollingIntervalRef.current);
-        pollingIntervalRef.current = null;
-      }
-    };
-    
-    const handleSSEError = () => {
+    return () => subscription.unsubscribe()
+  }, [session.token])
 
-      if (!pollingIntervalRef.current) {
-        pollingIntervalRef.current = setInterval(() => {
-          loadStats()
-          loadActivePins()
-          loadQueues()
-          loadRecentReports()
-        }, 60000);
-      }
-    };
-    
-    const unsubscribeConnected = eventBus.on('sse:connected', handleSSEConnected);
-    const unsubscribeError = eventBus.on('sse:error', handleSSEError);
-    
-    // التحقق من حالة SSE الحالية
-    if (window.eventBusSSE?.isConnected()) {
-      handleSSEConnected();
-    } else {
-      handleSSEError();
-    }
-    
-    return () => {
-      if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current)
-      unsubscribeConnected();
-      unsubscribeError();
-      if (sseRef.current) sseRef.current.close()
-    }
-  }, [])
-
-  const loadQueues = async () => {
+  const runAction = async (key, action) => {
+    setBusyKey(key)
     try {
-      const data = await api.getAdminStatus()
-      if (data && data.success && data.queues) {
-        const clinicNames = {
-          lab: 'المختبر والأشعة',
-          xray: 'الأشعة',
-          vitals: 'القياسات الحيوية',
-          ecg: 'تخطيط القلب',
-          audio: 'السمعيات',
-          eyes: 'عيادة العيون',
-          internal: 'عيادة الباطنية',
-          ent: 'عيادة أنف وأذن وحنجرة',
-          surgery: 'عيادة الجراحة العامة',
-          dental: 'عيادة الأسنان',
-          psychiatry: 'عيادة النفسية',
-          derma: 'عيادة الجلدية',
-          bones: 'عيادة العظام والمفاصل'
-        }
-        
-        const queuesArray = Object.entries(data.queues).map(([clinicId, queueData]) => ({
-          id: clinicId,
-          name: clinicNames[clinicId] || clinicId,
-          nameAr: clinicNames[clinicId] || clinicId,
-          current: queueData.current,
-          waiting: queueData.waiting || 0,
-          total: queueData.list?.length || 0,
-          pin: queueData.pin,
-          avgTime: 0,
-          list: queueData.list || []
-        }))
-        
-        setQueues(queuesArray)
-      }
+      await action()
+      await loadDashboard()
     } catch (error) {
-      // console.error('Failed to load queues:', error)
-      setQueues([])
-    }
-  }
-
-  const loadStats = async () => {
-    try {
-      const data = await api.getQueueStats()
-      setStats(data)
-    } catch (error) {
-      // console.error('Failed to load stats:', error)
-    }
-  }
-
-  const loadActivePins = async () => {
-    try {
-      const data = await api.getActivePins(adminCode)
-      setActivePins(data.pins || [])
-    } catch (error) {
-      // console.error('Failed to load pins:', error)
-    }
-  }
-
-  const loadRecentReports = async () => {
-    try {
-      const data = await api.getRecentReports(adminCode)
-      setRecentReports(data.reports || [])
-    } catch (error) {
-      // console.error('Failed to load recent reports:', error)
-      setRecentReports([])
-    }
-  }
-
-  const handleCallNext = async (queueType) => {
-    setLoading(true)
-    try {
-      await api.callNextPatient(queueType, adminCode)
-      await loadStats()
-    } catch (error) {
-      // console.error('Failed to call next patient:', error)
+      showFeedback(error.message, 'error')
     } finally {
-      setLoading(false)
-    }
-  }
-
-  const handlePauseQueue = async (queueType) => {
-    setLoading(true)
-    try {
-      await api.pauseQueue(queueType, adminCode)
-      await loadStats()
-    } catch (error) {
-      // console.error('Failed to pause queue:', error)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const handleGeneratePin = async (stationId) => {
-    setLoading(true)
-    try {
-      await api.generatePIN(stationId, adminCode)
-      await loadActivePins()
-    } catch (error) {
-      // console.error('Failed to generate PIN:', error)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const handleDeactivatePin = async (pinId) => {
-    setLoading(true)
-    try {
-      await api.deactivatePIN(pinId, adminCode)
-      await loadActivePins()
-    } catch (error) {
-      // console.error('Failed to deactivate PIN:', error)
-    } finally {
-      setLoading(false)
+      setBusyKey('')
     }
   }
 
@@ -218,11 +65,11 @@ export function AdminPage({ onLogout, language, toggleLanguage, currentTheme, on
     <div className="w-64 bg-gray-800/50 border-r border-gray-700 p-4 z-10">
       <div className="flex items-center gap-3 mb-8">
         <div className="w-10 h-10 bg-gradient-to-br from-red-500 to-yellow-500 rounded-full flex items-center justify-center">
-          <span className="text-white font-bold">⚕️</span>
+          <Stethoscope className="h-5 w-5 text-white" />
         </div>
         <div>
-          <h2 className="text-white font-semibold">Admin Dashboard</h2>
-          <p className="text-gray-400 text-sm">Welcome admin</p>
+          <h2 className="text-white font-semibold">{language === 'ar' ? 'لوحة الإدارة' : 'Admin panel'}</h2>
+          <p className="text-gray-400 text-sm">{session.username}</p>
         </div>
       </div>
 
@@ -231,57 +78,28 @@ export function AdminPage({ onLogout, language, toggleLanguage, currentTheme, on
           variant={currentView === 'dashboard' ? 'secondary' : 'ghost'}
           className="w-full justify-start"
           onClick={() => setCurrentView('dashboard')}
+          data-testid="admin-nav-dashboard-button"
         >
           <BarChart3 className="icon icon-md me-3" />
-          لوحة التحكم
-        </Button>
-        <Button
-          variant={currentView === 'enhanced' ? 'secondary' : 'ghost'}
-          className="w-full justify-start"
-          onClick={() => setCurrentView('enhanced')}
-        >
-          <Activity className="icon icon-md me-3" />
-          لوحة التحكم المحسنة
+          {language === 'ar' ? 'لوحة التحكم' : 'Dashboard'}
         </Button>
         <Button
           variant={currentView === 'queues' ? 'secondary' : 'ghost'}
           className="w-full justify-start"
           onClick={() => setCurrentView('queues')}
+          data-testid="admin-nav-queues-button"
         >
           <Users className="icon icon-md me-3" />
-          إدارة الطوابير
+          {language === 'ar' ? 'إدارة الطوابير' : 'Queue management'}
         </Button>
         <Button
-          variant={currentView === 'pins' ? 'secondary' : 'ghost'}
+          variant={currentView === 'doctors' ? 'secondary' : 'ghost'}
           className="w-full justify-start"
-          onClick={() => setCurrentView('pins')}
+          onClick={() => setCurrentView('doctors')}
+          data-testid="admin-nav-doctors-button"
         >
-          <Lock className="icon icon-md me-3" />
-          إدارة الأرقام السرية
-        </Button>
-        <Button
-          variant={currentView === 'reports' ? 'secondary' : 'ghost'}
-          className="w-full justify-start"
-          onClick={() => setCurrentView('reports')}
-        >
-          <FileText className="icon icon-md me-3" />
-          التقارير
-        </Button>
-        <Button
-          variant={currentView === 'clinics' ? 'secondary' : 'ghost'}
-          className="w-full justify-start"
-          onClick={() => setCurrentView('clinics')}
-        >
-          <Settings className="icon icon-md me-3" />
-          تكوين العيادات
-        </Button>
-        <Button
-          variant={currentView === 'settings' ? 'secondary' : 'ghost'}
-          className="w-full justify-start"
-          onClick={() => setCurrentView('settings')}
-        >
-          <Settings className="icon icon-md me-3" />
-          الإعدادات
+          <Building2 className="icon icon-md me-3" />
+          {language === 'ar' ? 'إدارة الأطباء' : 'Doctor management'}
         </Button>
       </nav>
     </div>
@@ -290,86 +108,39 @@ export function AdminPage({ onLogout, language, toggleLanguage, currentTheme, on
   const renderDashboard = () => (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-white">لوحة التحكم</h1>
-        <Button variant="outline" onClick={loadStats} disabled={loading}>
+        <h1 className="text-2xl font-bold text-white">{language === 'ar' ? 'لوحة التحكم' : 'Dashboard'}</h1>
+        <Button variant="outline" onClick={() => loadDashboard().catch((error) => showFeedback(error.message, 'error'))} disabled={busyKey === 'refresh-dashboard'} data-testid="admin-dashboard-refresh-button">
           <RefreshCw className="icon icon-md me-2" />
-          تحديث
+          {language === 'ar' ? 'تحديث' : 'Refresh'}
         </Button>
       </div>
 
-      {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <Card className="bg-gray-800/50 border-gray-700">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-gray-400 text-sm">إجمالي المنتظرين</p>
-                <p className="text-3xl font-bold text-white">{stats?.stats?.totalWaiting || 0}</p>
-              </div>
-              <Users className="icon icon-xl text-blue-400" />
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-gray-800/50 border-gray-700">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-gray-400 text-sm">الطوابير النشطة</p>
-                <p className="text-3xl font-bold text-white">{stats?.stats?.activeQueues || 0}</p>
-              </div>
-              <Activity className="icon icon-xl text-green-400" />
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-gray-800/50 border-gray-700">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-gray-400 text-sm">الفحوص المكتملة</p>
-                <p className="text-3xl font-bold text-white">{stats?.stats?.completedToday || 0}</p>
-              </div>
-              <CheckCircle className="icon icon-xl text-purple-400" />
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-gray-800/50 border-gray-700">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-gray-400 text-sm">متوسط الانتظار (دقيقة)</p>
-                <p className="text-3xl font-bold text-white">{stats?.stats?.avgWaitTime || 0}</p>
-              </div>
-              <Clock className="icon icon-xl text-yellow-400" />
-            </div>
-          </CardContent>
-        </Card>
+        <MetricCard label={language === 'ar' ? 'إجمالي المرضى' : 'Total patients'} value={dashboard?.overview?.totalPatients || 0} icon={<Users className="icon icon-xl text-blue-400" />} testId="admin-total-patients-value" />
+        <MetricCard label={language === 'ar' ? 'بانتظار النداء' : 'Waiting'} value={dashboard?.overview?.waitingCount || 0} icon={<Home className="icon icon-xl text-green-400" />} testId="admin-waiting-count-value" />
+        <MetricCard label={language === 'ar' ? 'مكتمل' : 'Completed'} value={dashboard?.overview?.completedCount || 0} icon={<CheckCircle className="icon icon-xl text-purple-400" />} testId="admin-completed-count-value" />
+        <MetricCard label={language === 'ar' ? 'متوسط الانتظار' : 'Avg wait'} value={dashboard?.overview?.avgWaitMinutes || 0} icon={<Clock className="icon icon-xl text-yellow-400" />} testId="admin-avg-wait-value" />
       </div>
 
-      {/* Live Queue Status */}
       <Card className="bg-gray-800/50 border-gray-700">
         <CardHeader>
-          <CardTitle className="text-white">حالة الطوابير الحية</CardTitle>
+          <CardTitle className="text-white">{language === 'ar' ? 'حالة العيادات' : 'Clinic status'}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          {queues.length === 0 ? (
-            <div className="text-center text-gray-400 py-8">
-              {language === 'ar' ? 'لا توجد طوابير نشطة' : 'No active queues'}
+          {(dashboard?.clinics || []).length === 0 ? (
+            <div className="text-center text-gray-400 py-8" data-testid="admin-empty-clinic-status">
+              {language === 'ar' ? 'لا توجد عيادات نشطة' : 'No active clinics'}
             </div>
           ) : (
-            queues.map((queue, index) => (
-              <div key={queue.id || index} className="flex items-center justify-between p-4 bg-gray-700/50 rounded-lg">
+            dashboard.clinics.map((clinic) => (
+              <div key={clinic.id} className="flex items-center justify-between p-4 bg-gray-700/50 rounded-lg" data-testid={`admin-dashboard-clinic-card-${clinic.id}`}>
                 <div>
-                  <h3 className="text-white font-semibold">{queue.name || queue.nameAr}</h3>
-                  <p className="text-gray-400 text-sm">
-                    الرقم الحالي: {queue.current || 0} | في الانتظار: {queue.waiting || 0}
-                  </p>
+                  <h3 className="text-white font-semibold">{clinic.name}</h3>
+                  <p className="text-gray-400 text-sm" data-testid={`admin-dashboard-clinic-current-${clinic.id}`}>{language === 'ar' ? 'الحالي' : 'Current'}: {clinic.currentPatient?.patientId || '—'}</p>
                 </div>
                 <div className="text-right">
-                  <p className="text-white font-semibold">{queue.avgTime ? `${queue.avgTime} دقيقة` : '-'}</p>
-                  <p className="text-gray-400 text-sm">متوسط الوقت</p>
+                  <p className="text-white font-semibold" data-testid={`admin-dashboard-clinic-waiting-${clinic.id}`}>{clinic.waitingCount}</p>
+                  <p className="text-gray-400 text-sm">{language === 'ar' ? 'في الانتظار' : 'Waiting'}</p>
                 </div>
               </div>
             ))
@@ -382,64 +153,56 @@ export function AdminPage({ onLogout, language, toggleLanguage, currentTheme, on
   const renderQueues = () => (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-white">إدارة الطوابير</h1>
-        <Button variant="outline" onClick={loadStats}>
+        <h1 className="text-2xl font-bold text-white">{language === 'ar' ? 'إدارة الطوابير' : 'Queue management'}</h1>
+        <Button variant="outline" onClick={() => loadDashboard().catch((error) => showFeedback(error.message, 'error'))} data-testid="admin-queues-refresh-button">
           <RefreshCw className="icon icon-md me-2" />
-          تحديث
+          {language === 'ar' ? 'تحديث' : 'Refresh'}
         </Button>
       </div>
 
       <div className="space-y-4">
-        {queues.length === 0 ? (
-          <div className="text-center text-gray-400 py-8">
+        {(dashboard?.clinics || []).length === 0 ? (
+          <div className="text-center text-gray-400 py-8" data-testid="admin-queues-empty-state">
             {language === 'ar' ? 'لا توجد طوابير للإدارة' : 'No queues to manage'}
           </div>
         ) : (
-          queues.map((queue) => (
-            <Card key={queue.id} className="bg-gray-800/50 border-gray-700">
+          dashboard.clinics.map((clinic) => (
+            <Card key={clinic.id} className="bg-gray-800/50 border-gray-700" data-testid={`admin-queue-card-${clinic.id}`}>
               <CardContent className="p-6">
                 <div className="flex items-center justify-between">
                   <div className="flex-1">
                     <div className="flex items-center gap-3 mb-2">
-                      <h3 className="text-white font-semibold text-lg">{queue.name || queue.nameAr}</h3>
-                      {queue.pin && (
-                        <span className="px-3 py-1 bg-blue-500/20 border border-blue-500 rounded-lg text-blue-300 font-mono text-sm">
-                          PIN: {queue.pin}
-                        </span>
-                      )}
+                      <h3 className="text-white font-semibold text-lg">{clinic.name}</h3>
                     </div>
-                      <div className="grid grid-cols-3 gap-4 text-center">
+                    <div className="grid grid-cols-3 gap-4 text-center">
                       <div>
-                        <p className="text-2xl font-bold text-white">{queue.current || '-'}</p>
-                        <p className="text-gray-400 text-sm">رقمك</p>
+                        <p className="text-2xl font-bold text-white" data-testid={`admin-queue-current-number-${clinic.id}`}>{clinic.currentPatient?.queueNumber || '—'}</p>
+                        <p className="text-gray-400 text-sm">{language === 'ar' ? 'الحالي' : 'Current'}</p>
                       </div>
                       <div>
-                        <p className="text-2xl font-bold text-yellow-400">{queue.waiting || 0}</p>
-                        <p className="text-gray-400 text-sm">الحالي</p>
+                        <p className="text-2xl font-bold text-yellow-400" data-testid={`admin-queue-waiting-count-${clinic.id}`}>{clinic.waitingCount || 0}</p>
+                        <p className="text-gray-400 text-sm">{language === 'ar' ? 'بانتظار النداء' : 'Waiting'}</p>
                       </div>
                       <div>
-                        <p className="text-2xl font-bold text-green-400">{queue.total || 0}</p>
-                        <p className="text-gray-400 text-sm">أمامك</p>
+                        <p className="text-2xl font-bold text-green-400" data-testid={`admin-queue-completed-count-${clinic.id}`}>{clinic.completedCount || 0}</p>
+                        <p className="text-gray-400 text-sm">{language === 'ar' ? 'مكتمل' : 'Completed'}</p>
                       </div>
                     </div>
                   </div>
-                      <div className="flex flex-col gap-2 ml-4">
+                  <div className="flex flex-col gap-2 ml-4">
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => handleCallNext(queue.id)}
-                      disabled={loading || !queue.waiting}
+                      onClick={() => runAction(`call-next-${clinic.id}`, async () => {
+                        await api.callNextPatient(session.token, { clinicId: clinic.id })
+                        showFeedback(language === 'ar' ? 'تم استدعاء المراجع التالي' : 'Next patient called')
+                      })}
+                      disabled={busyKey === `call-next-${clinic.id}` || !clinic.waitingCount}
                       className="border-yellow-500 text-yellow-400 hover:bg-yellow-500/10"
+                      data-testid={`admin-call-next-button-${clinic.id}`}
                     >
-                      استدعاء التالي
-                    </Button>
-                    <Button
-                      variant="gradientSecondary"
-                      size="sm"
-                      onClick={() => handlePauseQueue(queue.id)}
-                      disabled={loading}
-                    >
-                      إيقاف مؤقت
+                      <PhoneCall className="h-4 w-4" />
+                      {language === 'ar' ? 'استدعاء التالي' : 'Call next'}
                     </Button>
                   </div>
                 </div>
@@ -451,225 +214,8 @@ export function AdminPage({ onLogout, language, toggleLanguage, currentTheme, on
     </div>
   )
 
-  const renderPins = () => (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-white">إدارة أكواد PIN</h1>
-        <div className="flex gap-2">
-          <Button variant="gradient" onClick={() => handleGeneratePin('lab')}>
-            + إضافة PIN
-          </Button>
-          <Button variant="gradientSecondary" onClick={loadActivePins}>
-            تحديث الكل
-          </Button>
-        </div>
-      </div>
-
-      {/* Stats */}
-      <div className="grid grid-cols-3 gap-6">
-        <Card className="bg-gray-800/50 border-gray-700">
-          <CardContent className="p-6 text-center">
-            <p className="text-3xl font-bold text-white">{activePins.length || 0}</p>
-            <p className="text-gray-400 text-sm whitespace-nowrap">أكواد نشطة</p>
-          </CardContent>
-        </Card>
-        <Card className="bg-gray-800/50 border-gray-700">
-          <CardContent className="p-6 text-center">
-            <p className="text-3xl font-bold text-white">{activePins.filter(p => p.status === 'used').length || 0}</p>
-            <p className="text-gray-400 text-sm whitespace-nowrap">مستخدمة</p>
-          </CardContent>
-        </Card>
-        <Card className="bg-gray-800/50 border-gray-700">
-          <CardContent className="p-6 text-center">
-            <p className="text-3xl font-bold text-white">{activePins.filter(p => p.status === 'active').length || 0}</p>
-            <p className="text-gray-400 text-sm whitespace-nowrap">متاحة</p>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Active PINs */}
-      <Card className="bg-gray-800/50 border-gray-700">
-        <CardHeader>
-          <CardTitle className="text-white">الأكواد النشطة</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {activePins.length === 0 ? (
-            <div className="text-center text-gray-400 py-8">
-              {language === 'ar' ? 'لا توجد أكواد نشطة' : 'No active PINs'}
-            </div>
-          ) : (
-            activePins.map((pin) => (
-              <div key={pin.id} className="flex items-center justify-between p-4 bg-gray-700/50 rounded-lg">
-                <div className="flex items-center gap-4">
-                  <div className="text-2xl font-bold text-white">{pin.pin || pin.id}</div>
-                  <div>
-                    <p className="text-white font-semibold">{pin.clinicId || pin.code || 'N/A'}</p>
-                    <p className="text-gray-400 text-sm">{pin.status === 'active' ? 'نشط' : 'مستخدم'}</p>
-                  </div>
-                </div>
-                <div className="flex gap-2">
-                  <Button
-                    variant="gradientSecondary"
-                    size="sm"
-                    onClick={() => handleDeactivatePin(pin.id)}
-                    disabled={loading}
-                  >
-                    إلغاء تفعيل
-                  </Button>
-                </div>
-              </div>
-            ))
-          )}
-        </CardContent>
-      </Card>
-    </div>
-  )
-
-  const renderReports = () => (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-white">إنشاء التقارير</h1>
-        <Button variant="outline" className="border-yellow-500 text-yellow-400">
-          خط الإنتاجات
-        </Button>
-      </div>
-
-      {/* Report Types */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-        <Card className="bg-gray-800/50 border-gray-700">
-          <CardHeader>
-            <CardTitle className="text-white text-lg">تقارير يومية</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <Button variant="gradient" className="w-full justify-start gap-2 text-xs">
-              <FileText className="w-4 h-4 flex-shrink-0" />
-              <span>تقرير يومي PDF</span>
-            </Button>
-            <Button variant="gradientSecondary" className="w-full justify-start gap-2 text-xs">
-              <FileText className="w-4 h-4 flex-shrink-0" />
-              <span>تقرير يومي Excel</span>
-            </Button>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-gray-800/50 border-gray-700">
-          <CardHeader>
-            <CardTitle className="text-white text-lg">تقارير أسبوعية</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <Button variant="gradient" className="w-full justify-start gap-2 text-xs">
-              <BarChart3 className="w-4 h-4 flex-shrink-0" />
-              <span>تقرير إجمالي أسبوعي</span>
-            </Button>
-            <Button variant="gradientSecondary" className="w-full justify-start gap-2 text-xs">
-              <Activity className="w-4 h-4 flex-shrink-0" />
-              <span>تقرير الأداء الأسبوعي</span>
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Recent Reports */}
-      <Card className="bg-gray-800/50 border-gray-700">
-        <CardHeader>
-          <CardTitle className="text-white">التقارير الحديثة</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {recentReports.length === 0 ? (
-            <div className="text-center text-gray-400 py-8">
-              {t('noReports', language)}
-            </div>
-          ) : (
-            recentReports.map((report, index) => (
-              <div key={index} className="flex items-center justify-between p-4 bg-gray-700/50 rounded-lg">
-                <div className="flex items-center gap-3 flex-1 min-w-0">
-                  <FileText className="w-5 h-5 text-gray-400 flex-shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-white font-medium truncate">{report.name}</p>
-                    <p className="text-gray-400 text-sm">{report.size} - {report.date}</p>
-                  </div>
-                </div>
-                <Button variant="outline" size="sm" className="border-yellow-500 text-yellow-400 flex-shrink-0 gap-2">
-                  <Download className="w-4 h-4" />
-                  <span>تحميل</span>
-                </Button>
-              </div>
-            ))
-          )}
-        </CardContent>
-      </Card>
-    </div>
-  )
-
-  const renderSettings = () => {
-    return (
-      <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-bold text-white">إعدادات النظام المتقدمة</h1>
-        </div>
-        
-        {/* لوحة الإعدادات المتقدمة */}
-        <SystemSettingsPanel language={language} />
-        
-        {/* إعدادات المظهر */}
-        <div className="mt-6">
-          <h2 className="text-xl font-bold text-white mb-4">إعدادات المظهر</h2>
-        </div>
-
-        {/* General Settings */}
-        <Card className="bg-gray-800/50 border-gray-700">
-          <CardHeader>
-            <CardTitle className="text-white">إعدادات عامة</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex items-center justify-between">
-              <span className="text-white">التحديث التلقائي</span>
-              <div className="w-12 h-6 bg-green-500 rounded-full relative">
-                <div className="w-5 h-5 bg-white rounded-full absolute top-0.5 right-0.5"></div>
-              </div>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-white">تفعيل الصوت</span>
-              <div className="w-12 h-6 bg-green-500 rounded-full relative">
-                <div className="w-5 h-5 bg-white rounded-full absolute top-0.5 right-0.5"></div>
-              </div>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-white">الإشعارات</span>
-              <div className="w-12 h-6 bg-green-500 rounded-full relative">
-                <div className="w-5 h-5 bg-white rounded-full absolute top-0.5 right-0.5"></div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Theme Settings */}
-        <Card className="bg-gray-800/50 border-gray-700">
-          <CardHeader>
-            <CardTitle className="text-white">إعدادات المظهر</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-              {enhancedMedicalThemes.map((theme) => (
-                <button
-                  key={theme.id}
-                  onClick={() => onThemeChange(theme.id)}
-                  className={`p-2 rounded-lg text-sm font-medium transition-all border ${currentTheme === theme.id ? 'border-theme-primary ring-2 ring-theme-primary/50' : 'border-gray-700 hover:border-gray-500'}`}
-                  style={{ background: theme.gradients.primary, color: 'white' }}
-                >
-                  {language === 'ar' ? theme.nameAr : theme.name}
-                </button>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    )
-  }
-
   return (
     <div className="min-h-screen bg-gray-900">
-      {/* Top Header */}
       <header className="border-b border-gray-800 bg-gray-900/50 backdrop-blur-sm">
         <div className="flex items-center justify-between px-6 py-4">
           <div className="flex items-center gap-4">
@@ -683,53 +229,37 @@ export function AdminPage({ onLogout, language, toggleLanguage, currentTheme, on
           </div>
 
           <div className="text-center">
-            <h2 className="text-white font-medium">Welcome to the Medical Committee System</h2>
+            <h2 className="text-white font-medium">{language === 'ar' ? 'نظام اللجنة الطبية' : 'Medical Committee System'}</h2>
           </div>
 
           <div className="flex items-center gap-2">
-            <Button variant="ghost" size="sm" className="text-gray-300 hover:text-white">
-              <Settings className="icon icon-md me-2" />
-              Admin
-            </Button>
-            <Button variant="ghost" size="sm" className="text-gray-300 hover:text-white">
-              English 🇺🇸
-            </Button>
-            <Button variant="ghost" size="sm" className="text-gray-300 hover:text-white">
-              Night Shift
+            <Button variant="ghost" size="sm" className="text-gray-300 hover:text-white" onClick={toggleLanguage} data-testid="admin-language-toggle-button">
+              <Globe className="icon icon-md me-2" />
+              {language === 'ar' ? 'English' : 'العربية'}
             </Button>
           </div>
         </div>
       </header>
 
-      {/* Admin Header */}
       <div className="border-b border-gray-800 bg-gray-800/30">
         <div className="flex items-center justify-between px-6 py-3">
           <div className="flex items-center gap-3">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="text-gray-300 hover:text-white"
-              onClick={toggleLanguage}
-            >
-              <Globe className="icon icon-md me-2" />
-              {language === 'ar' ? 'English 🇺🇸' : 'العربية 🇶🇦'}
-            </Button>
             <div className="w-10 h-10 bg-gradient-to-br from-red-500 to-yellow-500 rounded-full flex items-center justify-center">
-              <span className="text-white font-bold">⚕️</span>
+              <Stethoscope className="h-5 w-5 text-white" />
             </div>
             <div>
-              <h2 className="text-white font-semibold">Admin Dashboard</h2>
-              <p className="text-gray-400 text-sm">Welcome admin</p>
+              <h2 className="text-white font-semibold">{language === 'ar' ? 'لوحة الإدارة' : 'Admin dashboard'}</h2>
+              <p className="text-gray-400 text-sm">{session.username}</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" className="border-yellow-500 text-yellow-400">
+            <Button variant="outline" size="sm" className="border-yellow-500 text-yellow-400" data-testid="admin-home-button">
               <Home className="icon icon-md me-2" />
-              Home
+              {language === 'ar' ? 'الرئيسية' : 'Home'}
             </Button>
-            <Button variant="gradientSecondary" size="sm" onClick={onLogout}>
+            <Button variant="gradientSecondary" size="sm" onClick={onLogout} data-testid="admin-logout-button">
               <LogOut className="icon icon-md me-2" />
-              Logout
+              {language === 'ar' ? 'خروج' : 'Logout'}
             </Button>
           </div>
         </div>
@@ -738,22 +268,40 @@ export function AdminPage({ onLogout, language, toggleLanguage, currentTheme, on
       <div className="flex relative">
         {renderSidebar()}
         <main className="flex-1 p-6">
+          {feedback && (
+            <div className={`mb-4 rounded-lg border px-4 py-3 ${feedback.tone === 'error' ? 'border-red-400 bg-red-500/15 text-red-100' : 'border-green-400 bg-green-500/15 text-green-100'}`} data-testid="admin-feedback-banner">
+              {feedback.message}
+            </div>
+          )}
           {currentView === 'dashboard' && renderDashboard()}
-          {currentView === 'enhanced' && (
-            <EnhancedAdminDashboard
+          {currentView === 'queues' && renderQueues()}
+          {currentView === 'doctors' && (
+            <DoctorManagement
+              token={session.token}
+              doctors={dashboard?.doctors || []}
+              clinics={dashboard?.clinics || []}
+              onChange={loadDashboard}
               language={language}
-              onLogout={onLogout}
             />
           )}
-          {currentView === 'queues' && renderQueues()}
-          {currentView === 'pins' && renderPins()}
-          {currentView === 'reports' && renderReports()}
-          {currentView === 'clinics' && (
-            <ClinicsConfiguration language={language} />
-          )}
-          {currentView === 'settings' && renderSettings()}
         </main>
       </div>
     </div>
+  )
+}
+
+function MetricCard({ label, value, icon, testId }) {
+  return (
+    <Card className="bg-gray-800/50 border-gray-700">
+      <CardContent className="p-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-gray-400 text-sm">{label}</p>
+            <p className="text-3xl font-bold text-white" data-testid={testId}>{value}</p>
+          </div>
+          {icon}
+        </div>
+      </CardContent>
+    </Card>
   )
 }

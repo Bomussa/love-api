@@ -12,6 +12,12 @@ export interface StorageAdapter {
   list(prefix: string): Promise<string[]>;
 }
 
+function readRuntimeEnv(name: string): string {
+  const runtimeProcess = (globalThis as any)?.process
+  const runtimeEnv = runtimeProcess?.env || {}
+  return (runtimeEnv[name] || '').toString().trim()
+}
+
 /**
  * Vercel KV Adapter using Upstash Redis
  */
@@ -175,9 +181,7 @@ export class MemoryAdapter implements StorageAdapter {
  * Create and return the appropriate storage adapter
  */
 export function createStorageAdapter(): StorageAdapter {
-  // Check if Vercel KV environment variables are set
-  const hasKV = process.env.KV_URL || process.env.KV_REST_API_URL || 
-                process.env.VERCEL_KV_REST_API_URL || process.env.REDIS_URL;
+  const hasKV = readRuntimeEnv('KV_URL') || readRuntimeEnv('KV_REST_API_URL') || readRuntimeEnv('VERCEL_KV_REST_API_URL') || readRuntimeEnv('REDIS_URL')
   
   if (hasKV) {
     try {

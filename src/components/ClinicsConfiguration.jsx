@@ -1,389 +1,207 @@
-import React, { useState, useEffect } from 'react'
+import React, { useMemo, useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from './Card'
 import { Button } from './Button'
-import {
-  MapPin,
-  Stethoscope,
-  Eye,
-  Heart,
-  Brain,
-  Bone,
-  Ear,
-  TestTube,
-  Activity,
-  Users,
-  Clock,
-  Settings,
-  Plus,
-  Edit,
-  Trash2,
-  Save,
-  X
-} from 'lucide-react'
+import { Input } from './Input'
+import { KeyRound, Shield, Trash2, UserPlus } from 'lucide-react'
+import api from '../lib/api'
 
-// تكوين العيادات والمسارات بناءً على نماذج الفحص الطبي
-const EXAM_ROUTES = {
-  'دورات_داخلية_خارجية': {
-    name: 'فحص الدورات الداخلية والخارجية',
-    floors: {
-      'mezzanine': {
-        name: 'الطابق الميزانين',
-        note: 'يمكن التوجه إلى طابق الميزانين عن طريق المصعد بالضغط على حرف M',
-        clinics: ['المختبر']
-      },
-      'second': {
-        name: 'الطابق الثاني (عيادات اللجنة الطبية العسكرية)',
-        clinics: [
-          'القياسات الحيوية',
-          'عيادة العيون',
-          'عيادة الباطنية',
-          'عيادة الجراحة العامة',
-          'عيادة العظام والمفاصل',
-          'عيادة أنف وأذن وحنجرة'
-        ]
-      }
-    }
-  },
-  'تجنيد_ترفيع_نقل_تحويل_تجديد': {
-    name: 'فحص التجنيد والترفيع والنقل والتحويل وتجديد التعاقد',
-    floors: {
-      'mezzanine': {
-        name: 'الطابق الميزانين',
-        note: 'يمكن التوجه إلى طابق الميزانين عن طريق المصعد بالضغط على حرف M',
-        clinics: ['المختبر والأشعة']
-      },
-      'second': {
-        name: 'الطابق الثاني (عيادات اللجنة الطبية العسكرية)',
-        clinics: [
-          'القياسات الحيوية',
-          'عيادة العيون',
-          'عيادة الباطنية',
-          'عيادة الجراحة العامة',
-          'عيادة العظام والمفاصل',
-          'عيادة أنف وأذن وحنجرة',
-          'عيادة النفسية',
-          'عيادة الأسنان'
-        ]
-      }
-    }
-  },
-  'طيران_سنوي': {
-    name: 'فحص الطيران السنوي',
-    floors: {
-      'mezzanine': {
-        name: 'الطابق الميزانين',
-        note: 'يمكن التوجه إلى طابق الميزانين عن طريق المصعد بالضغط على حرف M',
-        clinics: ['المختبر']
-      },
-      'second': {
-        name: 'الطابق الثاني (عيادات اللجنة الطبية العسكرية)',
-        clinics: [
-          'عيادة العيون',
-          'عيادة الباطنية',
-          'عيادة أنف وأذن وحنجرة',
-          'عيادة تخطيط القلب',
-          'عيادة السمع'
-        ]
-      }
-    }
-  },
-  'طباخين': {
-    name: 'فحص الطباخين',
-    floors: {
-      'mezzanine': {
-        name: 'الطابق الميزانين',
-        note: 'يمكن التوجه إلى طابق الميزانين عن طريق المصعد بالضغط على حرف M',
-        clinics: ['المختبر']
-      },
-      'second': {
-        name: 'الطابق الثاني (عيادات اللجنة الطبية العسكرية)',
-        clinics: [
-          'عيادة الباطنية',
-          'عيادة أنف وأذن وحنجرة',
-          'عيادة الجراحة العامة'
-        ]
-      }
-    }
-  },
-  'عنصر_نسائي': {
-    name: 'العنصر النسائي (جميع الفحوصات)',
-    floors: {
-      'mezzanine': {
-        name: 'الطابق الميزانين',
-        note: 'يمكن التوجه إلى طابق الميزانين عن طريق المصعد بالضغط على حرف M',
-        clinics: ['المختبر']
-      },
-      'second': {
-        name: 'الطابق الثاني (عيادات اللجنة الطبية العسكرية)',
-        clinics: [
-          'القياسات الحيوية',
-          'عيادة أنف وأذن وحنجرة',
-          'عيادة الجراحة العامة',
-          'عيادة العظام والمفاصل',
-          'عيادة النفسية',
-          'عيادة الأسنان'
-        ]
-      },
-      'third': {
-        name: 'الطابق الثالث',
-        note: 'يجب التسجيل من استقبال العطار',
-        clinics: [
-          'عيادة الباطنية',
-          'عيادة العيون',
-          'عيادة الجلدية'
-        ]
-      }
-    }
+/**
+ * Doctor management module used inside the admin dashboard.
+ *
+ * The original clinic-configuration screen was repurposed to satisfy the new
+ * simplified scope without introducing another file.
+ */
+export function DoctorManagement({ token, doctors = [], clinics = [], onChange, language }) {
+  const [form, setForm] = useState({ displayName: '', username: '', password: '', clinicId: '' })
+  const [passwordDrafts, setPasswordDrafts] = useState({})
+  const [feedback, setFeedback] = useState(null)
+  const [busyKey, setBusyKey] = useState('')
+
+  const clinicOptions = useMemo(() => clinics.map((clinic) => ({
+    id: clinic.id,
+    name: clinic.name
+  })), [clinics])
+
+  const showFeedback = (message, tone = 'success') => {
+    setFeedback({ message, tone })
+    window.setTimeout(() => setFeedback(null), 2500)
   }
-}
 
-const CLINIC_ICONS = {
-  'المختبر': TestTube,
-  'المختبر والأشعة': TestTube,
-  'القياسات الحيوية': Activity,
-  'عيادة العيون': Eye,
-  'عيادة الباطنية': Heart,
-  'عيادة الجراحة العامة': Stethoscope,
-  'عيادة العظام والمفاصل': Bone,
-  'عيادة أنف وأذن وحنجرة': Ear,
-  'عيادة النفسية': Brain,
-  'عيادة الأسنان': Stethoscope,
-  'عيادة تخطيط القلب': Heart,
-  'عيادة السمع': Ear,
-  'عيادة الجلدية': Stethoscope
-}
-
-export function ClinicsConfiguration({ language }) {
-  const [selectedExam, setSelectedExam] = useState('دورات_داخلية_خارجية')
-  const [clinicsData, setClinicsData] = useState({})
-  const [editMode, setEditMode] = useState(false)
-  const [modifiedRoutes, setModifiedRoutes] = useState(EXAM_ROUTES)
-  const [hasChanges, setHasChanges] = useState(false)
-
-  const handleSaveChanges = async () => {
+  const runAction = async (key, action) => {
+    setBusyKey(key)
     try {
-      // TODO: حفظ التعديلات إلى API
-      // await api.updateExamRoutes(modifiedRoutes)
-
-      setHasChanges(false)
-      setEditMode(false)
-      alert(language === 'ar' ? 'تم حفظ التعديلات بنجاح' : 'Changes saved successfully')
+      await action()
+      await onChange?.()
     } catch (error) {
-      // console.error('Error saving changes:', error)
-      alert(language === 'ar' ? 'فشل حفظ التعديلات' : 'Failed to save changes')
+      showFeedback(error.message, 'error')
+    } finally {
+      setBusyKey('')
     }
   }
 
-  const handleCancelEdit = () => {
-    setModifiedRoutes(EXAM_ROUTES)
-    setHasChanges(false)
-    setEditMode(false)
-  }
-
-  const handleAddClinic = (examKey, floorKey) => {
-    const clinicName = prompt(language === 'ar' ? 'أدخل اسم العيادة الجديدة:' : 'Enter new clinic name:')
-    if (clinicName && clinicName.trim()) {
-      const newRoutes = { ...modifiedRoutes }
-      newRoutes[examKey].floors[floorKey].clinics.push(clinicName.trim())
-      setModifiedRoutes(newRoutes)
-      setHasChanges(true)
-    }
-  }
-
-  const handleRemoveClinic = (examKey, floorKey, clinicIndex) => {
-    const confirmed = confirm(language === 'ar' ? 'هل تريد حذف هذه العيادة؟' : 'Remove this clinic?')
-    if (confirmed) {
-      const newRoutes = { ...modifiedRoutes }
-      newRoutes[examKey].floors[floorKey].clinics.splice(clinicIndex, 1)
-      setModifiedRoutes(newRoutes)
-      setHasChanges(true)
-    }
-  }
-
-  const getClinicIcon = (clinicName) => {
-    const IconComponent = CLINIC_ICONS[clinicName] || Stethoscope
-    return <IconComponent className="h-4 w-4" />
-  }
-
-  const getFloorColor = (floorKey) => {
-    switch (floorKey) {
-      case 'mezzanine': return 'bg-blue-50 border-blue-200'
-      case 'second': return 'bg-green-50 border-green-200'
-      case 'third': return 'bg-purple-50 border-purple-200'
-      default: return 'bg-gray-50 border-gray-200'
-    }
-  }
-
-  const getFloorIcon = (floorKey) => {
-    switch (floorKey) {
-      case 'mezzanine': return 'M'
-      case 'second': return '2'
-      case 'third': return '3'
-      default: return '?'
-    }
+  const handleCreateDoctor = async (event) => {
+    event.preventDefault()
+    await runAction('create-doctor', async () => {
+      await api.createDoctor(token, form)
+      setForm({ displayName: '', username: '', password: '', clinicId: '' })
+      showFeedback(language === 'ar' ? 'تم إنشاء الطبيب بنجاح' : 'Doctor created successfully')
+    })
   }
 
   return (
-    <div className="space-y-6" dir="rtl">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">تكوين العيادات والمسارات</h1>
-          <div className="text-sm text-gray-500 mt-1">
-            بناءً على نماذج الفحص الطبي المعتمدة
-          </div>
+    <div className="space-y-6" data-testid="doctor-management-panel">
+      {feedback && (
+        <div
+          className={`rounded-lg border px-4 py-3 ${feedback.tone === 'error' ? 'border-red-400 bg-red-500/15 text-red-100' : 'border-green-400 bg-green-500/15 text-green-100'}`}
+          data-testid="doctor-management-feedback"
+        >
+          {feedback.message}
         </div>
-        <div className="flex gap-2">
-          {!editMode ? (
-            <Button onClick={() => setEditMode(true)} variant="outline" className="gap-2">
-              <Edit className="h-4 w-4" />
-              <span>تعديل المسارات</span>
-            </Button>
-          ) : (
-            <>
-              <Button
-                onClick={handleCancelEdit}
-                variant="outline"
-                className="gap-2"
-              >
-                <X className="h-4 w-4" />
-                <span>إلغاء</span>
-              </Button>
-              <Button
-                onClick={handleSaveChanges}
-                variant="default"
-                disabled={!hasChanges}
-                className="gap-2"
-              >
-                <Save className="h-4 w-4" />
-                <span>حفظ التغييرات</span>
-              </Button>
-            </>
-          )}
-        </div>
-      </div>
+      )}
 
-      {/* Exam Type Selection */}
-      <Card>
+      <Card className="bg-gray-800/50 border-gray-700">
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Settings className="h-5 w-5" />
-            اختيار نوع الفحص
+          <CardTitle className="flex items-center gap-2 text-white">
+            <UserPlus className="h-5 w-5 text-secondary" />
+            {language === 'ar' ? 'إنشاء طبيب / عيادة' : 'Create Doctor / Clinic'}
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-            {Object.entries(EXAM_ROUTES).map(([key, exam]) => (
-              <Button
-                key={key}
-                variant={selectedExam === key ? "default" : "outline"}
-                className="h-auto p-4 text-right justify-start"
-                onClick={() => setSelectedExam(key)}
-              >
-                <div>
-                  <div className="font-medium text-sm">{exam.name}</div>
-                  <div className="text-xs text-gray-500 mt-1">
-                    {Object.keys(exam.floors).length} طوابق
-                  </div>
-                </div>
+          <form className="grid gap-4 md:grid-cols-2 xl:grid-cols-4" onSubmit={handleCreateDoctor}>
+            <Input
+              value={form.displayName}
+              onChange={(event) => setForm((previous) => ({ ...previous, displayName: event.target.value }))}
+              placeholder={language === 'ar' ? 'اسم الطبيب' : 'Doctor name'}
+              className="bg-gray-700/40 border-gray-600 text-white"
+              data-testid="doctor-create-display-name-input"
+              required
+            />
+            <Input
+              value={form.username}
+              onChange={(event) => setForm((previous) => ({ ...previous, username: event.target.value }))}
+              placeholder={language === 'ar' ? 'اسم المستخدم' : 'Username'}
+              className="bg-gray-700/40 border-gray-600 text-white"
+              data-testid="doctor-create-username-input"
+              required
+            />
+            <Input
+              type="password"
+              value={form.password}
+              onChange={(event) => setForm((previous) => ({ ...previous, password: event.target.value }))}
+              placeholder={language === 'ar' ? 'كلمة المرور' : 'Password'}
+              className="bg-gray-700/40 border-gray-600 text-white"
+              data-testid="doctor-create-password-input"
+              required
+            />
+            <select
+              value={form.clinicId}
+              onChange={(event) => setForm((previous) => ({ ...previous, clinicId: event.target.value }))}
+              className="flex h-10 rounded-md border border-gray-600 bg-gray-700/40 px-3 py-2 text-sm text-white"
+              data-testid="doctor-create-clinic-select"
+              required
+            >
+              <option value="">{language === 'ar' ? 'اختر العيادة' : 'Select clinic'}</option>
+              {clinicOptions.map((clinic) => (
+                <option key={clinic.id} value={clinic.id}>{clinic.name}</option>
+              ))}
+            </select>
+            <div className="md:col-span-2 xl:col-span-4 flex justify-end">
+              <Button type="submit" variant="gradient" data-testid="doctor-create-submit-button" disabled={busyKey === 'create-doctor'}>
+                {busyKey === 'create-doctor'
+                  ? (language === 'ar' ? 'جاري الإنشاء...' : 'Creating...')
+                  : (language === 'ar' ? 'إنشاء الطبيب' : 'Create doctor')}
               </Button>
-            ))}
-          </div>
+            </div>
+          </form>
         </CardContent>
       </Card>
 
-      {/* Selected Exam Route */}
-      {selectedExam && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <MapPin className="h-5 w-5" />
-                <span>مسار الفحص: {modifiedRoutes[selectedExam].name}</span>
+      <Card className="bg-gray-800/50 border-gray-700">
+        <CardHeader>
+          <CardTitle className="text-white">{language === 'ar' ? 'الأطباء الحاليون' : 'Current doctors'}</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {doctors.length === 0 ? (
+            <div className="rounded-lg border border-dashed border-gray-600 px-4 py-6 text-center text-gray-300" data-testid="doctor-empty-state">
+              {language === 'ar' ? 'لا توجد حسابات أطباء بعد.' : 'No doctor accounts yet.'}
+            </div>
+          ) : doctors.map((doctor) => {
+            const draftPassword = passwordDrafts[doctor.id] || ''
+            const freezeKey = `freeze-${doctor.id}`
+            const passwordKey = `password-${doctor.id}`
+            const deleteKey = `delete-${doctor.id}`
+
+            return (
+              <div key={doctor.id} className="rounded-xl border border-gray-700 bg-gray-900/40 p-4" data-testid={`doctor-card-${doctor.id}`}>
+                <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                  <div className="space-y-2">
+                    <div className="text-lg font-semibold text-white" data-testid={`doctor-name-${doctor.id}`}>{doctor.displayName}</div>
+                    <div className="text-sm text-gray-300" data-testid={`doctor-username-${doctor.id}`}>{doctor.username}</div>
+                    <div className="text-sm text-gray-300" data-testid={`doctor-clinic-${doctor.id}`}>{doctor.clinicName}</div>
+                    <div className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${doctor.isFrozen ? 'bg-red-500/20 text-red-200' : 'bg-green-500/20 text-green-200'}`} data-testid={`doctor-status-${doctor.id}`}>
+                      {doctor.isFrozen
+                        ? (language === 'ar' ? 'مجمّد' : 'Frozen')
+                        : (language === 'ar' ? 'نشط' : 'Active')}
+                    </div>
+                  </div>
+
+                  <div className="grid gap-3 md:grid-cols-[1fr_auto_auto_auto] xl:min-w-[38rem]">
+                    <Input
+                      type="password"
+                      value={draftPassword}
+                      onChange={(event) => setPasswordDrafts((previous) => ({ ...previous, [doctor.id]: event.target.value }))}
+                      placeholder={language === 'ar' ? 'كلمة المرور الجديدة' : 'New password'}
+                      className="bg-gray-700/40 border-gray-600 text-white"
+                      data-testid={`doctor-password-input-${doctor.id}`}
+                    />
+                    <Button
+                      variant="outline"
+                      className="border-gray-600 text-white"
+                      onClick={() => runAction(passwordKey, async () => {
+                        await api.updateDoctorPassword(token, doctor.id, draftPassword)
+                        setPasswordDrafts((previous) => ({ ...previous, [doctor.id]: '' }))
+                        showFeedback(language === 'ar' ? 'تم تحديث كلمة المرور' : 'Password updated')
+                      })}
+                      data-testid={`doctor-password-update-button-${doctor.id}`}
+                      disabled={!draftPassword || busyKey === passwordKey}
+                    >
+                      <KeyRound className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      className="border-gray-600 text-white"
+                      onClick={() => runAction(freezeKey, async () => {
+                        await api.toggleDoctorFreeze(token, doctor.id)
+                        showFeedback(doctor.isFrozen
+                          ? (language === 'ar' ? 'تم إلغاء التجميد' : 'Doctor unfrozen')
+                          : (language === 'ar' ? 'تم تجميد الطبيب' : 'Doctor frozen'))
+                      })}
+                      data-testid={`doctor-freeze-button-${doctor.id}`}
+                      disabled={busyKey === freezeKey}
+                    >
+                      <Shield className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      className="border-red-400 text-red-200"
+                      onClick={() => runAction(deleteKey, async () => {
+                        await api.deleteDoctor(token, doctor.id)
+                        showFeedback(language === 'ar' ? 'تم حذف الطبيب' : 'Doctor deleted')
+                      })}
+                      data-testid={`doctor-delete-button-${doctor.id}`}
+                      disabled={busyKey === deleteKey}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
               </div>
-              {editMode && (
-                <div className="text-sm text-gray-500">
-                  وضع التعديل نشط
-                </div>
-              )}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-6">
-              {Object.entries(modifiedRoutes[selectedExam].floors).map(([floorKey, floor]) => (
-                <div key={floorKey} className={`p-4 rounded-lg border-2 ${getFloorColor(floorKey)}`}>
-                  <div className="flex items-center gap-3 mb-4">
-                    <div className="w-8 h-8 bg-white rounded-full flex items-center justify-center font-bold text-lg border-2">
-                      {getFloorIcon(floorKey)}
-                    </div>
-                    <div>
-                      <h3 className="font-semibold text-lg">{floor.name}</h3>
-                      {floor.note && (
-                        <p className="text-sm text-gray-600 mt-1">{floor.note}</p>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                    {floor.clinics.map((clinic, index) => (
-                      <div key={index} className="flex items-center justify-between gap-3 p-3 bg-white rounded-lg border">
-                        <div className="flex items-center gap-3 flex-1 min-w-0">
-                          <div className="text-blue-600 flex-shrink-0">
-                            {getClinicIcon(clinic)}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="font-medium text-sm truncate">{clinic}</div>
-                            <div className="text-xs text-gray-500">
-                              الخطوة {index + 1}
-                            </div>
-                          </div>
-                        </div>
-                        {editMode && (
-                          <Button
-                            onClick={() => handleRemoveClinic(selectedExam, floorKey, index)}
-                            variant="outline"
-                            size="sm"
-                            className="text-red-600 border-red-300 hover:bg-red-50 flex-shrink-0"
-                          >
-                            <Trash2 className="h-3 w-3" />
-                          </Button>
-                        )}
-                      </div>
-                    ))}
-                    {editMode && (
-                      <Button
-                        onClick={() => handleAddClinic(selectedExam, floorKey)}
-                        variant="outline"
-                        className="p-3 h-auto border-dashed gap-2"
-                      >
-                        <Plus className="h-4 w-4" />
-                        <span>إضافة عيادة</span>
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Dynamic Clinic Assignment Note */}
-      <Card className="bg-yellow-50 border-yellow-200">
-        <CardContent className="p-4">
-          <div className="flex items-start gap-3">
-            <div className="text-yellow-600 mt-1">
-              <Users className="h-5 w-5" />
-            </div>
-            <div>
-              <h4 className="font-medium text-yellow-800 mb-2">نظام التوزيع الديناميكي</h4>
-              <p className="text-sm text-yellow-700">
-                يتم توزيع المراجعين على العيادات بشكل ديناميكي (نموذج A و B و C و D)
-                لضمان عدم تراكم المراجعين على عيادة معينة وتحسين تدفق المرضى.
-              </p>
-            </div>
-          </div>
+            )
+          })}
         </CardContent>
       </Card>
     </div>
   )
 }
+
+export const ClinicsConfiguration = DoctorManagement

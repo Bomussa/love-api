@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="10" skipped="0" tests="13" time="7.201" timestamp="2026-04-11T10:10:57.971548+00:00" hostname="agent-env-c504b171-f30e-4804-8d38-367c712ddc2a"><testcase classname="backend.tests.test_v1_queue_admin_contract" name="test_admin_login_returns_success_token" time="1.120"><failure message="AssertionError: {&quot;success&quot;:false,&quot;error&quot;:&quot;Endpoint not found&quot;,&quot;code&quot;:&quot;NOT_FOUND&quot;}&#10;assert 404 == 200&#10; +  where 404 = &lt;Response [404]&gt;.status_code">backend/tests/test_v1_queue_admin_contract.py:60: in test_admin_login_returns_success_token
+    assert response.status_code == 200, response.text
+E   AssertionError: {"success":false,"error":"Endpoint not found","code":"NOT_FOUND"}
+E   assert 404 == 200
+E    +  where 404 = &lt;Response [404]&gt;.status_code</failure></testcase><testcase classname="backend.tests.test_v1_queue_admin_contract" name="test_patient_login_creates_or_restores_queue_entry" time="0.219"><failure message="AssertionError: {&quot;success&quot;:false,&quot;error&quot;:&quot;Invalid inputs&quot;,&quot;code&quot;:&quot;INVALID_INPUTS&quot;}&#10;assert 400 == 200&#10; +  where 400 = &lt;Response [400]&gt;.status_code">backend/tests/test_v1_queue_admin_contract.py:76: in test_patient_login_creates_or_restores_queue_entry
+    assert response.status_code == 200, response.text
+E   AssertionError: {"success":false,"error":"Invalid inputs","code":"INVALID_INPUTS"}
+E   assert 400 == 200
+E    +  where 400 = &lt;Response [400]&gt;.status_code</failure></testcase><testcase classname="backend.tests.test_v1_queue_admin_contract" name="test_patient_queue_status_returns_steps_and_current_visit" time="0.208"><failure message="AssertionError: {&quot;success&quot;:false,&quot;error&quot;:&quot;Missing clinicId&quot;,&quot;code&quot;:&quot;MISSING_CLINIC_ID&quot;}&#10;assert 400 == 200&#10; +  where 400 = &lt;Response [400]&gt;.status_code">backend/tests/test_v1_queue_admin_contract.py:89: in test_patient_queue_status_returns_steps_and_current_visit
+    assert response.status_code == 200, response.text
+E   AssertionError: {"success":false,"error":"Missing clinicId","code":"MISSING_CLINIC_ID"}
+E   assert 400 == 200
+E    +  where 400 = &lt;Response [400]&gt;.status_code</failure></testcase><testcase classname="backend.tests.test_v1_queue_admin_contract" name="test_call_next_moves_patient_to_called_state" time="0.999"><failure message="AssertionError: {'0': {'display_number': 0, 'patient_id': None, 'patient_name': None, 'success': False}, 'success': True}&#10;assert 'clinicId' in {}">backend/tests/test_v1_queue_admin_contract.py:111: in test_call_next_moves_patient_to_called_state
+    assert "clinicId" in data, body
+E   AssertionError: {'0': {'display_number': 0, 'patient_id': None, 'patient_name': None, 'success': False}, 'success': True}
+E   assert 'clinicId' in {}</failure></testcase><testcase classname="backend.tests.test_v1_queue_admin_contract" name="test_complete_patient_advances_route" time="0.994"><failure message="AssertionError: {&quot;success&quot;:false,&quot;error&quot;:&quot;Internal server error&quot;,&quot;code&quot;:&quot;PGRST116&quot;}&#10;assert 500 == 200&#10; +  where 500 = &lt;Response [500]&gt;.status_code">backend/tests/test_v1_queue_admin_contract.py:126: in test_complete_patient_advances_route
+    assert response.status_code == 200, response.text
+E   AssertionError: {"success":false,"error":"Internal server error","code":"PGRST116"}
+E   assert 500 == 200
+E    +  where 500 = &lt;Response [500]&gt;.status_code</failure></testcase><testcase classname="backend.tests.test_v1_queue_admin_contract" name="test_mark_absent_sets_skipped_no_show" time="1.166" /><testcase classname="backend.tests.test_v1_queue_admin_contract" name="test_transfer_patient_moves_to_target_clinic_waiting" time="0.484"><failure message="AssertionError: {'0': {'display_number': 0, 'patient_id': None, 'patient_name': None, 'success': False}, 'success': True}&#10;assert None == 'xray'&#10; +  where None = &lt;built-in method get of dict object at 0xfc70f06a7280&gt;('clinicId')&#10; +    where &lt;built-in method get of dict object at 0xfc70f06a7280&gt; = {}.get">backend/tests/test_v1_queue_admin_contract.py:174: in test_transfer_patient_moves_to_target_clinic_waiting
+    assert data.get("clinicId") == "xray", body
+E   AssertionError: {'0': {'display_number': 0, 'patient_id': None, 'patient_name': None, 'success': False}, 'success': True}
+E   assert None == 'xray'
+E    +  where None = &lt;built-in method get of dict object at 0xfc70f06a7280&gt;('clinicId')
+E    +    where &lt;built-in method get of dict object at 0xfc70f06a7280&gt; = {}.get</failure></testcase><testcase classname="backend.tests.test_v1_queue_admin_contract" name="test_postpone_patient_keeps_active_deprioritized" time="0.515" /><testcase classname="backend.tests.test_v1_queue_admin_contract" name="test_vip_fast_track_prioritizes_waiting_patient" time="0.467" /><testcase classname="backend.tests.test_v1_queue_admin_contract" name="test_admin_status_with_bearer_returns_overview" time="0.208"><failure message="AssertionError: {&quot;success&quot;:false,&quot;error&quot;:&quot;Endpoint not found&quot;,&quot;code&quot;:&quot;NOT_FOUND&quot;}&#10;assert 404 == 200&#10; +  where 404 = &lt;Response [404]&gt;.status_code">backend/tests/test_v1_queue_admin_contract.py:215: in test_admin_status_with_bearer_returns_overview
+    assert response.status_code == 200, response.text
+E   AssertionError: {"success":false,"error":"Endpoint not found","code":"NOT_FOUND"}
+E   assert 404 == 200
+E    +  where 404 = &lt;Response [404]&gt;.status_code</failure></testcase><testcase classname="backend.tests.test_v1_queue_admin_contract" name="test_admin_doctor_management_actions" time="0.233"><failure message="AssertionError: {&quot;success&quot;:false,&quot;error&quot;:&quot;Endpoint not found&quot;,&quot;code&quot;:&quot;NOT_FOUND&quot;}&#10;assert 404 == 200&#10; +  where 404 = &lt;Response [404]&gt;.status_code">backend/tests/test_v1_queue_admin_contract.py:240: in test_admin_doctor_management_actions
+    assert create_res.status_code == 200, create_res.text
+E   AssertionError: {"success":false,"error":"Endpoint not found","code":"NOT_FOUND"}
+E   assert 404 == 200
+E    +  where 404 = &lt;Response [404]&gt;.status_code</failure></testcase><testcase classname="backend.tests.test_v1_queue_admin_contract" name="test_doctor_login_for_created_doctor" time="0.218"><failure message="AssertionError: {&quot;success&quot;:false,&quot;error&quot;:&quot;Endpoint not found&quot;,&quot;code&quot;:&quot;NOT_FOUND&quot;}&#10;assert 404 == 200&#10; +  where 404 = &lt;Response [404]&gt;.status_code">backend/tests/test_v1_queue_admin_contract.py:296: in test_doctor_login_for_created_doctor
+    assert response.status_code == 200, response.text
+E   AssertionError: {"success":false,"error":"Endpoint not found","code":"NOT_FOUND"}
+E   assert 404 == 200
+E    +  where 404 = &lt;Response [404]&gt;.status_code</failure></testcase><testcase classname="backend.tests.test_v1_queue_admin_contract" name="test_doctor_queue_status_dashboard_payload" time="0.212"><failure message="AssertionError: {&quot;success&quot;:false,&quot;error&quot;:&quot;Endpoint not found&quot;,&quot;code&quot;:&quot;NOT_FOUND&quot;}&#10;assert 404 == 200&#10; +  where 404 = &lt;Response [404]&gt;.status_code">backend/tests/test_v1_queue_admin_contract.py:315: in test_doctor_queue_status_dashboard_payload
+    assert login_res.status_code == 200, login_res.text
+E   AssertionError: {"success":false,"error":"Endpoint not found","code":"NOT_FOUND"}
+E   assert 404 == 200
+E    +  where 404 = &lt;Response [404]&gt;.status_code</failure></testcase></testsuite></testsuites>

@@ -5,37 +5,46 @@ import { Globe, ArrowLeft } from 'lucide-react'
 import { examTypes } from '../lib/utils'
 import { t } from '../lib/i18n'
 
+/**
+ * Presents the allowed medical exam types before creating the queue journey.
+ *
+ * @param {object} props
+ * @param {(examType: string) => void} props.onExamSelect
+ * @param {() => void} props.onBack
+ * @param {string} props.language
+ * @param {() => void} props.toggleLanguage
+ * @returns {JSX.Element}
+ */
 export function ExamSelectionPage({ onExamSelect, onBack, language, toggleLanguage }) {
   return (
-    <div className="min-h-screen flex items-center justify-center p-4" data-test="exam-selection-page">
+    <div className="min-h-screen flex items-center justify-center p-4" data-testid="exam-selection-page">
       <div className="w-full max-w-4xl space-y-8">
-        {/* Language Selector */}
         <div className="absolute top-4 left-4">
           <Button
             variant="ghost"
             size="sm"
             className="text-gray-300 hover:text-white hover:bg-gray-800/50"
             onClick={toggleLanguage}
+            data-testid="exam-selection-language-toggle-button"
           >
             <Globe className="icon icon-md me-2" />
-            {language === 'ar' ? 'English 🇺🇸' : 'العربية 🇶🇦'}
+            {language === 'ar' ? 'English' : 'العربية'}
           </Button>
         </div>
 
-        {/* Back Button */}
         <div className="absolute top-4 right-4">
           <Button
             variant="ghost"
             size="sm"
             className="text-gray-300 hover:text-white hover:bg-gray-800/50"
             onClick={onBack}
+            data-testid="exam-selection-back-button"
           >
             <ArrowLeft className="icon icon-md me-2" />
             {language === 'ar' ? 'رجوع' : 'Back'}
           </Button>
         </div>
 
-        {/* Logo and Title */}
         <div className="text-center space-y-4">
           <img src="/logo.jpeg" alt="قيادة الخدمات الطبية" className="mx-auto w-32 h-32 rounded-full shadow-lg" />
 
@@ -54,7 +63,6 @@ export function ExamSelectionPage({ onExamSelect, onBack, language, toggleLangua
           </div>
         </div>
 
-        {/* Exam Selection */}
         <Card className="bg-gray-800/50 border-gray-700 backdrop-blur-sm">
           <CardContent className="p-8">
             <div className="text-center mb-8">
@@ -66,11 +74,10 @@ export function ExamSelectionPage({ onExamSelect, onBack, language, toggleLangua
                 <Button
                   key={exam.id}
                   variant="outline"
-                  className="h-32 flex-col gap-3 border-gray-600 hover:bg-gray-700/50 hover:border-yellow-500 transition-all duration-200"
+                  className="h-28 flex-col gap-2 border-gray-600 hover:bg-gray-700/50 hover:border-yellow-500 transition-all duration-200"
                   onClick={() => onExamSelect(exam.id)}
-                  data-test={`exam-option-${exam.id}`}
+                  data-testid={`exam-option-${exam.id}`}
                 >
-                  <div className="text-3xl">{exam.icon}</div>
                   <div className="text-center">
                     <div className="text-white font-medium text-sm">
                       {language === 'ar' ? exam.nameAr : exam.name}

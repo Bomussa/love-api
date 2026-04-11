@@ -1,97 +1,168 @@
+import {
+  appendActivity,
+  createSupabaseServerClient,
+  encodeQueueStatus,
+  error,
+  getPatientRouteState,
+  getQueueSchema,
+  handleCORSPreflight,
+  parseRequestBody,
+  readQueueOrder,
+  requireAuth,
+  savePatientRouteState,
+  toDatabaseClinicId,
+  success
+} from '../../_lib/json'
+
+export const config = { runtime: 'edge' }
+
 /**
- * Queue Done Endpoint
- * POST /api/v1/queue/done
- * Body: { clinic, user, pin }
- * Action: Marks a specific patient as DONE (and validates PIN)
+ * Completes the current clinic step and opens the next clinic automatically.
  */
-
-import { createClient } from '@supabase/supabase-js';
-
-export const config = { runtime: 'edge' };
-
-function jsonResponse(data: any, status = 200) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: {
-      'Content-Type': 'application/json',
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type'
-    }
-  });
-}
-
 export default async function handler(req: Request) {
   if (req.method === 'OPTIONS') {
-    return new Response(null, { status: 204, headers: {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type'
-    }});
+    return handleCORSPreflight()
   }
 
   if (req.method !== 'POST') {
-    return jsonResponse({ success: false, error: 'Method not allowed' }, 405);
+    return error('Method not allowed', 405)
   }
 
   try {
-    const body = await req.json();
-    const { clinic, user, pin } = body;
-
-    if (!clinic || !user) {
-      return jsonResponse({ success: false, error: 'Missing parameters' }, 400);
+    const authResult = await requireAuth(req, ['admin', 'doctor'])
+    if (authResult instanceof Response) {
+      return authResult
     }
 
-    const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const supabaseKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    const supabase = createSupabaseServerClient()
+    const queueSchema = await getQueueSchema(supabase)
+    const queueTable = queueSchema.table
+    const body = await parseRequestBody<any>(req)
+    const clinicId = body.clinicId || body.clinic
+    const clinicDbId = toDatabaseClinicId(clinicId, body.gender || 'male')
+    const patientId = body.patientId || body.user
 
-    if (!supabaseUrl || !supabaseKey) {
-      return jsonResponse({ success: false, error: 'Supabase config missing' }, 500);
+    if (!clinicId || !patientId) {
+      return error('clinicId and patientId are required', 400)
     }
 
-    const supabase = createClient(supabaseUrl, supabaseKey);
+    if (authResult.role === 'doctor' && authResult.clinicId !== clinicId) {
+      return error('Doctor cannot complete another clinic queue', 403)
+    }
 
-    // Validate PIN (Optional depending on strictness)
-    // If pin is provided, check against pins table
-    if (pin) {
-      const today = new Date().toISOString().split('T')[0];
-      const { data: pinData } = await supabase
-        .from('pins')
-        .select('pin')
-        .eq('clinic', clinic)
-        .eq('date', today)
-        .single();
-      
-      if (pinData && pinData.pin !== pin) {
-         return jsonResponse({ success: false, error: 'Invalid PIN' }, 400);
+    const { data: currentRow } = await supabase
+      .from(queueTable)
+      .select('*')
+      .eq(queueSchema.clinicField, clinicDbId)
+      .eq('patient_id', patientId)
+      .order(queueSchema.orderField, { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    if (!currentRow) {
+      return error('Patient is not present in this clinic queue', 404)
+    }
+
+    const routeState = await getPatientRouteState(supabase, patientId)
+    const route = Array.isArray(routeState?.route) ? [...routeState.route] : []
+    const currentIndex = typeof routeState?.currentIndex === 'number' ? routeState.currentIndex : route.indexOf(clinicId)
+    const nextClinic = route[currentIndex + 1] || null
+
+    const replacementRow = {
+      patient_id: currentRow.patient_id,
+      patient_name: currentRow.patient_name,
+      [queueSchema.clinicField]: currentRow[queueSchema.clinicField],
+      [queueSchema.orderField]: currentRow[queueSchema.orderField],
+      [queueSchema.examField]: currentRow[queueSchema.examField] || null,
+      qr_code: currentRow.qr_code || null,
+      entered_at: currentRow.entered_at || new Date().toISOString(),
+      called_at: currentRow.called_at || null,
+      completed_at: new Date().toISOString(),
+      notes: currentRow.notes || null,
+      metadata: currentRow.metadata || null,
+      status: encodeQueueStatus('completed', queueTable),
+      is_temporary: currentRow.is_temporary || false,
+      cancelled_at: currentRow.cancelled_at || null,
+      postpone_count: currentRow.postpone_count || 0
+    }
+
+    const { error: deleteError } = await supabase.from(queueTable).delete().eq('id', currentRow.id)
+    if (deleteError) {
+      return error(deleteError.message, 500)
+    }
+
+    const { error: completionInsertError } = await supabase.from(queueTable).insert(replacementRow)
+    if (completionInsertError) {
+      return error(completionInsertError.message, 500)
+    }
+
+    await appendActivity(supabase, {
+      patientId,
+      clinicId,
+      action: 'patient_completed',
+      details: { queueNumber: readQueueOrder(currentRow, queueSchema), nextClinic }
+    })
+
+    if (nextClinic) {
+      const { data: existingNextRow } = await supabase
+        .from(queueTable)
+        .select('*')
+        .eq(queueSchema.clinicField, toDatabaseClinicId(nextClinic, routeState?.gender || 'male'))
+        .eq('patient_id', patientId)
+        .maybeSingle()
+
+      if (!existingNextRow) {
+        const nextClinicDbId = toDatabaseClinicId(nextClinic, routeState?.gender || 'male')
+        const { data: targetRows } = await supabase.from(queueTable).select(queueSchema.orderField).eq(queueSchema.clinicField, nextClinicDbId).order(queueSchema.orderField, { ascending: false }).limit(1)
+        const nextNumber = (readQueueOrder((targetRows || [])[0] || {}, queueSchema) || 0) + 1
+
+        const { error: nextInsertError } = await supabase.from(queueTable).insert({
+          [queueSchema.clinicField]: nextClinicDbId,
+          patient_id: patientId,
+          patient_name: patientId,
+          [queueSchema.orderField]: nextNumber,
+          [queueSchema.examField]: routeState?.examType || null,
+          status: encodeQueueStatus('waiting', queueTable),
+          entered_at: new Date().toISOString()
+        })
+
+        if (nextInsertError) {
+          return error(nextInsertError.message, 500)
+        }
+
+        await appendActivity(supabase, {
+          patientId,
+          clinicId: nextClinic,
+          action: 'patient_waiting',
+          details: { queueNumber: nextNumber }
+        })
       }
+
+      if (routeState) {
+        await savePatientRouteState(supabase, {
+          ...routeState,
+          currentIndex: currentIndex + 1,
+          currentClinic: nextClinic,
+          status: 'waiting'
+        })
+      }
+
+      await supabase.from('patients').update({ status: 'active' }).eq('patient_id', patientId)
+    } else {
+      if (routeState) {
+        await savePatientRouteState(supabase, {
+          ...routeState,
+          currentIndex,
+          currentClinic: null,
+          status: 'completed'
+        })
+      }
+
+      await supabase.from('patients').update({ status: 'completed' }).eq('patient_id', patientId)
     }
 
-    // Update Status
-    const { error } = await supabase
-      .from('queue')
-      .update({ 
-        status: 'DONE',
-        completed_at: new Date().toISOString()
-      })
-      .eq('clinic', clinic)
-      .eq('patient_id', user);
-
-    if (error) throw error;
-
-    // Move patient to next clinic? 
-    // Usually handled by frontend 'verify-pin' flow which calls 'done' then 'enter' next.
-    // We just confirm done here.
-
-    return jsonResponse({
-      success: true,
-      message: 'Queue completed'
-    });
-
-  } catch (error: any) {
-    return jsonResponse({
-      success: false,
-      error: error.message
-    }, 500);
+    return success({ patientId, clinicId, nextClinic })
+  } catch (requestError: any) {
+    return error(requestError.message, 500)
   }
 }

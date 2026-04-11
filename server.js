@@ -7,12 +7,19 @@ import cors from 'cors';
 
 dotenv.config();
 
+function readRuntimeEnv(name, fallback = '') {
+  const runtimeProcess = globalThis?.process;
+  const runtimeEnv = runtimeProcess?.env || {};
+  const value = runtimeEnv[name];
+  return value === undefined || value === null || value === '' ? fallback : value;
+}
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-const PORT = process.env.PORT || 3000;
-const HOST = process.env.HOST || '0.0.0.0';
+const PORT = readRuntimeEnv('PORT', '3000');
+const HOST = readRuntimeEnv('HOST', '0.0.0.0');
 
 // Security middleware
 app.use(cors()); // Enable CORS for all routes
@@ -38,7 +45,7 @@ app.listen(PORT, HOST, () => {
 ╠═══════════════════════════════════════════════╣
 ║  Server: http://${HOST}:${PORT}              ║
 ║  Status: Running                              ║
-║  Environment: ${process.env.NODE_ENV || 'development'}                    ║
+║  Environment: ${readRuntimeEnv('NODE_ENV', 'development')}                    ║
 ║                                               ║
 ║  Note: This server only serves the frontend.  ║
 ║  API is handled by Cloudflare Pages Functions ║

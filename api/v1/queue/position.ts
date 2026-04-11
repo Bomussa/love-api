@@ -1,101 +1,80 @@
-/**
- * Queue Position Endpoint
- * GET /api/v1/queue/position?clinic=xxx&user=yyy
- * Returns current position of a user in the queue
- */
+import {
+  createSupabaseServerClient,
+  error,
+  getQueueSchema,
+  handleCORSPreflight,
+  normaliseQueueStatus,
+  readQueueOrder,
+  sortQueueRows,
+  toDatabaseClinicId,
+  success
+} from '../../_lib/json'
 
-import { createClient } from '@supabase/supabase-js';
-
-export const config = { runtime: 'edge' };
-
-function jsonResponse(data: any, status = 200) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: {
-      'Content-Type': 'application/json',
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type'
-    }
-  });
-}
+export const config = { runtime: 'edge' }
 
 export default async function handler(req: Request) {
   if (req.method === 'OPTIONS') {
-    return new Response(null, { status: 204, headers: {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type'
-    }});
+    return handleCORSPreflight()
   }
 
   if (req.method !== 'GET') {
-    return jsonResponse({ success: false, error: 'Method not allowed' }, 405);
+    return error('Method not allowed', 405)
   }
 
   try {
-    const url = new URL(req.url);
-    const clinic = url.searchParams.get('clinic');
-    const user = url.searchParams.get('user');
+    const url = new URL(req.url)
+    const clinic = url.searchParams.get('clinic') || ''
+    const clinicDbId = toDatabaseClinicId(clinic, 'male')
+    const user = url.searchParams.get('user') || ''
 
     if (!clinic || !user) {
-      return jsonResponse({ success: false, error: 'Missing parameters' }, 400);
+      return error('Missing parameters', 400)
     }
 
-    const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const supabaseKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    const supabase = createSupabaseServerClient()
+    const queueSchema = await getQueueSchema(supabase)
+    const queueTable = queueSchema.table
 
-    if (!supabaseUrl || !supabaseKey) {
-      return jsonResponse({ success: false, error: 'Supabase config missing' }, 500);
-    }
-
-    const supabase = createClient(supabaseUrl, supabaseKey);
-
-    // Get user entry
-    const { data: entry, error } = await supabase
-      .from('queue')
+    const { data: entry, error: entryError } = await supabase
+      .from(queueTable)
       .select('*')
-      .eq('clinic', clinic)
+      .eq(queueSchema.clinicField, clinicDbId)
       .eq('patient_id', user)
-      .single();
+      .order(queueSchema.orderField, { ascending: false })
+      .limit(1)
+      .maybeSingle()
 
-    if (error || !entry) {
-      return jsonResponse({ success: false, error: 'Not in queue' }, 404);
+    if (entryError || !entry) {
+      return error('Not in queue', 404)
     }
 
-    // Calculate ahead
-    const { count } = await supabase
-      .from('queue')
-      .select('*', { count: 'exact', head: true })
-      .eq('clinic', clinic)
-      .eq('status', 'WAITING')
-      .lt('number', entry.number); // Count those with lower number
+    const { data: clinicRows, error: clinicError } = await supabase
+      .from(queueTable)
+      .select('*')
+      .eq(queueSchema.clinicField, clinicDbId)
+      .order(queueSchema.orderField, { ascending: true })
 
-    // Total Waiting
-    const { count: totalWaiting } = await supabase
-      .from('queue')
-      .select('*', { count: 'exact', head: true })
-      .eq('clinic', clinic)
-      .eq('status', 'WAITING');
+    if (clinicError) {
+      return error(clinicError.message, 500)
+    }
 
-    const ahead = count || 0;
-    const position = ahead + 1;
+    const waitingRows = sortQueueRows((clinicRows || []).filter((row: any) => normaliseQueueStatus(row.status) === 'waiting'), queueSchema)
+    const currentServing = (clinicRows || []).find((row: any) => ['called', 'serving'].includes(normaliseQueueStatus(row.status)))
+    const queueNumber = readQueueOrder(entry, queueSchema)
+    const ahead = waitingRows.filter((row: any) => readQueueOrder(row, queueSchema) < queueNumber).length
 
-    return jsonResponse({
-      success: true,
+    return success({
       clinic,
-      user,
-      position,
+      patientId: user,
+      queueNumber,
+      displayNumber: ahead + 1,
       ahead,
-      number: entry.number,
-      status: entry.status,
-      total_waiting: totalWaiting || 0
-    });
+      currentServingNumber: currentServing ? readQueueOrder(currentServing, queueSchema) : null,
+      status: normaliseQueueStatus(entry.status),
+      totalWaiting: waitingRows.length
+    })
 
-  } catch (error: any) {
-    return jsonResponse({
-      success: false,
-      error: error.message
-    }, 500);
+  } catch (requestError: any) {
+    return error(requestError.message, 500)
   }
 }

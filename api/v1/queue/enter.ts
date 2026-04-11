@@ -1,143 +1,85 @@
+import {
+  createSupabaseServerClient,
+  error,
+  getQueueSchema,
+  handleCORSPreflight,
+  normaliseQueueStatus,
+  parseRequestBody,
+  readQueueOrder,
+  toDatabaseClinicId,
+  success
+} from '../../_lib/json'
+
+export const config = { runtime: 'edge' }
+
 /**
- * Queue Enter Endpoint
- * POST /api/v1/queue/enter
- * Body: { clinic, user }
+ * Adds a patient to a clinic queue using the unified API contract.
  */
-
-import { createClient } from '@supabase/supabase-js';
-
-export const config = { runtime: 'edge' };
-
-function jsonResponse(data: any, status = 200) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: {
-      'Content-Type': 'application/json',
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type'
-    }
-  });
-}
-
 export default async function handler(req: Request) {
   if (req.method === 'OPTIONS') {
-    return new Response(null, { status: 204, headers: {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type'
-    }});
+    return handleCORSPreflight()
   }
 
   if (req.method !== 'POST') {
-    return jsonResponse({ success: false, error: 'Method not allowed' }, 405);
+    return error('Method not allowed', 405)
   }
 
   try {
-    const body = await req.json();
-    const { clinic, user } = body;
+    const body = await parseRequestBody<any>(req)
+    const clinicId = body.clinicId || body.clinic
+    const clinicDbId = toDatabaseClinicId(clinicId, body.gender || 'male')
+    const patientId = body.patientId || body.user
 
-    if (!clinic || !user) {
-      return jsonResponse({
-        success: false,
-        error: 'Missing clinic or user'
-      }, 400);
+    if (!clinicId || !patientId) {
+      return error('Missing clinicId or patientId', 400)
     }
 
-    const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const supabaseKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    const supabase = createSupabaseServerClient()
+    const queueSchema = await getQueueSchema(supabase)
+    const queueTable = queueSchema.table
 
-    if (!supabaseUrl || !supabaseKey) {
-      return jsonResponse({
-        success: false,
-        error: 'Supabase configuration missing'
-      }, 500);
-    }
-
-    const supabase = createClient(supabaseUrl, supabaseKey);
-
-    // Check if already in queue
-    const { data: existing } = await supabase
-      .from('queue')
+    const { data: clinicRows } = await supabase
+      .from(queueTable)
       .select('*')
-      .eq('clinic', clinic)
-      .eq('patient_id', user)
-      .single();
+      .eq(queueSchema.clinicField, clinicDbId)
+      .order(queueSchema.orderField, { ascending: true })
 
-    if (existing) {
-      const { data: allInQueue } = await supabase
-        .from('queue')
-        .select('*')
-        .eq('clinic', clinic)
-        .eq('status', 'WAITING')
-        .order('number', { ascending: true });
-
-      const position = (allInQueue?.findIndex(item => item.patient_id === user) || 0) + 1;
-
-      return jsonResponse({
-        success: true,
-        clinic,
-        user,
-        number: existing.number,
-        status: 'ALREADY_IN_QUEUE',
-        ahead: position - 1,
-        display_number: position,
-        position,
-        message: 'Already in queue'
-      });
+    const existingRow = (clinicRows || []).find((row: any) => row.patient_id === patientId)
+    if (existingRow) {
+      const waitingRows = (clinicRows || []).filter((row: any) => normaliseQueueStatus(row.status) === 'waiting')
+      return success({
+        clinicId,
+        patientId,
+        queueNumber: readQueueOrder(existingRow, queueSchema),
+        ahead: waitingRows.filter((row: any) => readQueueOrder(row, queueSchema) < readQueueOrder(existingRow, queueSchema)).length,
+        displayNumber: waitingRows.filter((row: any) => readQueueOrder(row, queueSchema) <= readQueueOrder(existingRow, queueSchema)).length || 1,
+        status: normaliseQueueStatus(existingRow.status)
+      })
     }
 
-    // Get next number
-    const { data: lastEntry } = await supabase
-      .from('queue')
-      .select('number')
-      .eq('clinic', clinic)
-      .order('number', { ascending: false })
-      .limit(1)
-      .single();
-
-    const nextNumber = (lastEntry?.number || 0) + 1;
-
-    // Insert new entry
-    const { error: insertError } = await supabase
-      .from('queue')
-      .insert({
-        clinic,
-        patient_id: user,
-        number: nextNumber,
-        status: 'WAITING',
-        entered_at: new Date().toISOString()
-      });
+    const nextNumber = (clinicRows || []).reduce((max: number, row: any) => Math.max(max, readQueueOrder(row, queueSchema) || 0), 0) + 1
+    const { error: insertError } = await supabase.from(queueTable).insert({
+      [queueSchema.clinicField]: clinicDbId,
+      patient_id: patientId,
+      patient_name: patientId,
+      [queueSchema.orderField]: nextNumber,
+      status: 'waiting',
+      entered_at: new Date().toISOString()
+    })
 
     if (insertError) {
-      return jsonResponse({
-        success: false,
-        error: insertError.message
-      }, 500);
+      return error(insertError.message, 500)
     }
 
-    // Count waiting
-    const { count } = await supabase
-      .from('queue')
-      .select('*', { count: 'exact', head: true })
-      .eq('clinic', clinic)
-      .eq('status', 'WAITING');
-
-    return jsonResponse({
-      success: true,
-      clinic,
-      user,
-      number: nextNumber,
-      status: 'WAITING',
-      ahead: (count || 1) - 1,
-      display_number: count || 1,
-      position: count || 1
-    });
-  } catch (error: any) {
-    return jsonResponse({
-      success: false,
-      error: error.message,
-      timestamp: new Date().toISOString()
-    }, 500);
+    return success({
+      clinicId,
+      patientId,
+      queueNumber: nextNumber,
+      ahead: (clinicRows || []).filter((row: any) => normaliseQueueStatus(row.status) === 'waiting').length,
+      displayNumber: (clinicRows || []).filter((row: any) => normaliseQueueStatus(row.status) === 'waiting').length + 1,
+      status: 'waiting'
+    })
+  } catch (requestError: any) {
+    return error(requestError.message, 500)
   }
 }

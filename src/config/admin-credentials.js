@@ -1,51 +1,24 @@
 /**
- * Admin Credentials Configuration
- * تكوين بيانات دخول الإدارة
- * 
- * مشروع 2027 - نظام اللجنة الطبية العسكرية
+ * Legacy local admin configuration placeholder.
+ *
+ * Authentication is now handled exclusively by the backend using runtime
+ * secrets, so this file intentionally contains no credentials.
  */
-
 export const ADMIN_CREDENTIALS = {
-  // بيانات الدخول الرئيسية
-  username: 'admin',
-  password: 'BOMUSSA14490',
-  // Alternative password for easier testing/legacy support
-  secondaryPassword: 'admin123',
-  
-  // بيانات إضافية للتحقق
-  roles: ['admin', 'super_admin'],
-  permissions: [
-    'dashboard',
-    'queue_management',
-    'pin_management',
-    'reports',
-    'clinic_configuration',
-    'settings'
-  ],
-  
-  // معلومات النظام
-  systemInfo: {
-    projectName: 'مشروع 2027',
-    version: '2.0.0',
-    lastUpdate: '2025-10-23'
-  }
+  username: '',
+  roles: ['admin'],
+  permissions: ['dashboard', 'queue_management', 'doctor_management']
 }
 
 /**
- * التحقق من بيانات الدخول
- * @param {string} username - اسم المستخدم
- * @param {string} password - كلمة المرور
- * @returns {boolean} - نتيجة التحقق
+ * Local credential validation is permanently disabled.
  */
-export function validateAdminCredentials(username, password) {
-  if (username !== ADMIN_CREDENTIALS.username) return false
-  return password === ADMIN_CREDENTIALS.password || password === ADMIN_CREDENTIALS.secondaryPassword
+export function validateAdminCredentials() {
+  return false
 }
 
 /**
- * التحقق من الصلاحيات
- * @param {string} permission - الصلاحية المطلوبة
- * @returns {boolean} - هل الصلاحية متاحة
+ * Retained for compatibility with older imports.
  */
 export function hasPermission(permission) {
   return ADMIN_CREDENTIALS.permissions.includes(permission)

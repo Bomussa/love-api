@@ -1,0 +1,91 @@
+{
+  "summary": "Executed backend-only contract regression for requested v1 admin/patient/queue APIs against public deployment. Contract mismatch is severe: 10/13 tests failed and key endpoints/actions do not match expected implementation.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "POST /api/v1/admin/status?action=admin_login",
+        "issue": "Returns 404 Endpoint not found instead of success token payload.",
+        "priority": "CRITICAL"
+      },
+      {
+        "endpoint": "GET /api/v1/admin/status (Bearer)",
+        "issue": "Returns 404 Endpoint not found; admin overview/clinics/doctors contract unavailable.",
+        "priority": "CRITICAL"
+      },
+      {
+        "endpoint": "POST /api/v1/patient/login",
+        "issue": "Returns 400 Invalid inputs for valid {patientId, gender, examType} payload expected by new contract.",
+        "priority": "HIGH"
+      },
+      {
+        "endpoint": "GET /api/v1/queue/status?patientId=...",
+        "issue": "Returns 400 Missing clinicId, indicating old API shape and no patient journey contract.",
+        "priority": "HIGH"
+      },
+      {
+        "endpoint": "POST /api/v1/queue/done action=complete_patient",
+        "issue": "Returns 500 Internal server error (code: PGRST116).",
+        "priority": "HIGH"
+      },
+      {
+        "endpoint": "POST /api/v1/admin/status actions create_doctor/update_doctor_password/toggle_doctor_freeze/delete_doctor",
+        "issue": "All unavailable due to endpoint 404; doctor lifecycle cannot be executed.",
+        "priority": "CRITICAL"
+      },
+      {
+        "endpoint": "POST /api/v1/admin/status action=doctor_login",
+        "issue": "Unavailable due to 404 on admin endpoint.",
+        "priority": "CRITICAL"
+      },
+      {
+        "endpoint": "GET /api/v1/queue/status?doctorId=...",
+        "issue": "Blocked by missing doctor login/admin endpoint; doctor dashboard contract untestable on current deployment.",
+        "priority": "HIGH"
+      }
+    ],
+    "minor": [
+      {
+        "endpoint": "POST /api/v1/queue/call action=call_next",
+        "issue": "Returns non-standard legacy payload ({\"0\": {...}, \"success\": true) without expected data.clinicId/patient contract."
+      },
+      {
+        "endpoint": "POST /api/v1/queue/call action=transfer_patient",
+        "issue": "Returns legacy payload structure; expected transferred clinic contract missing."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_v1_queue_admin_contract.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Deploy the updated API implementation that includes /api/v1/admin/status with admin_login/doctor_login and authenticated admin actions.",
+    "Point tests to the correct public environment for this branch (current public URL appears to serve an older backend contract).",
+    "Fix /api/v1/queue/done 500 (PGRST116) for complete_patient flow.",
+    "Normalize /api/v1/queue/call response shape to the unified {success, data} contract.",
+    "Provide /app/memory/test_credentials.md (missing) per auth-testing requirement for future agents."
+  ],
+  "critical_code_review_comments": [
+    "Public deployed API contract is out of sync with repository handlers in /app/api/v1/* (major release/deployment mismatch).",
+    "Auth testing prerequisite file /app/memory/test_credentials.md is missing, which violates testing playbook and increases credential drift risk.",
+    "Queue call endpoint currently exposes inconsistent payload schema, creating frontend/backend integration fragility."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_v1_queue_admin_contract.py",
+    "/app/test_reports/iteration_1.json"
+  ],
+  "success_rate": {
+    "backend": "23%",
+    "frontend": "N/A (skipped by request)"
+  },
+  "seed_data_creation": "Created runtime test IDs and attempted doctor lifecycle payloads via API only; no direct DB seeding.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Use /app/backend/tests/test_v1_queue_admin_contract.py with API_BASE set to target deployment. Current run used https://www.mmc-mms.com and showed old/legacy API behavior incompatible with requested features.",
+  "rca of the issue": "Root cause is primarily environment/contract mismatch: repository contains new Supabase-backed handlers, but tested public endpoint serves older API (404 for /admin/status and legacy queue payloads). Reproduction: run pytest with API_BASE=https://www.mmc-mms.com. Mitigation: deploy current branch APIs to the same public URL (or provide correct target URL for this branch), then rerun full contract suite."
+}
