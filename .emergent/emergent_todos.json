@@ -1,22 +1,22 @@
 [
   {
-    "content": "تحديث الخطة وفق الكود الحقيقي ومطابقة الواجهات/المسارات/الـcontracts",
+    "content": "تحديد baseline المعتمد من commit ecd5387 وإعادة فحصه محليًا",
     "status": "completed"
   },
   {
-    "content": "إصلاح missing routes وتسجيلها داخل v1 router/app mount دون كسر المنطق الحالي",
-    "status": "completed"
-  },
-  {
-    "content": "فحص وإزالة أي PIN logic أو route أو UI متبقٍ إن وجد",
+    "content": "إلغاء أي تعديلات لاحقة غير معتمدة والانتقال للعمل فوق baseline فقط",
     "status": "in_progress"
   },
   {
-    "content": "مراجعة تدفق queue وشاشات الإدارة/الطبيب وربط الواجهة مع الباك اند من مصدر حقيقي واحد",
+    "content": "إعادة تطبيق الإصلاحات النهائية المطلوبة على baseline في love و love-api",
     "status": "pending"
   },
   {
-    "content": "اختبار شامل باستخدام testing_agent_v3 ومعالجة جميع المشاكل حتى النجاح",
+    "content": "التحقق من اتصال love مع love-api/Supabase واختبار رحلة المراجع 222 مع الطبيب والإدارة",
+    "status": "pending"
+  },
+  {
+    "content": "تجهيز وتطبيق التعديلات على GitHub (love و love-api) بعد التحقق",
     "status": "pending"
   }
 ]
