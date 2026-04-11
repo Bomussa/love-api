@@ -1,0 +1,22 @@
+[
+  {
+    "content": "تحديث الخطة وفق الكود الحقيقي ومطابقة الواجهات/المسارات/الـcontracts",
+    "status": "completed"
+  },
+  {
+    "content": "إصلاح missing routes وتسجيلها داخل v1 router/app mount دون كسر المنطق الحالي",
+    "status": "completed"
+  },
+  {
+    "content": "فحص وإزالة أي PIN logic أو route أو UI متبقٍ إن وجد",
+    "status": "in_progress"
+  },
+  {
+    "content": "مراجعة تدفق queue وشاشات الإدارة/الطبيب وربط الواجهة مع الباك اند من مصدر حقيقي واحد",
+    "status": "pending"
+  },
+  {
+    "content": "اختبار شامل باستخدام testing_agent_v3 ومعالجة جميع المشاكل حتى النجاح",
+    "status": "pending"
+  }
+]
