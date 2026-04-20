@@ -89,7 +89,7 @@ export default async function handler(req, res) {
       } else {
         // تحديث الجنس دائماً لضمان صحة البيانات
         await supabase.from('patients')
-          .update({ gender: genderValue, updated_at: new Date().toISOString() })
+          .update({ gender: genderValue, updated_at: getQatarTime() })
           .eq('id', patient.id);
         patient = { ...patient, gender: genderValue };
       }
@@ -261,7 +261,7 @@ export default async function handler(req, res) {
       if (error) {
         // fallback مباشر
         const { data: fb, error: fe } = await supabase.from('unified_queue')
-          .update({ status:'serving', exam_start_time: new Date().toISOString(), entered_clinic_at: new Date().toISOString() })
+          .update({ status:'serving', exam_start_time: getQatarTime(), entered_clinic_at: getQatarTime() })
           .eq('id', queueId).select().single();
         if (fe) throw fe;
         return res.status(200).json({ success:true, data:fb });
@@ -286,7 +286,7 @@ export default async function handler(req, res) {
       if (error) {
         // fallback مباشر
         const { data: fb, error: fe } = await supabase.from('unified_queue')
-          .update({ status:'done', completed_at: new Date().toISOString(), exam_end_time: new Date().toISOString() })
+          .update({ status:'done', completed_at: getQatarTime(), exam_end_time: getQatarTime() })
           .eq('id', queueId).select().single();
         if (fe) throw fe;
         return res.status(200).json({ success:true, data:fb });
