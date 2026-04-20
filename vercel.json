@@ -5,31 +5,28 @@
       "maxDuration": 30
     }
   },
-  "headers": [
-    {
-      "source": "/api/(.*)",
-      "headers": [
-        { "key": "Access-Control-Allow-Origin",  "value": "*" },
-        { "key": "Access-Control-Allow-Methods", "value": "GET,POST,PUT,DELETE,OPTIONS,PATCH" },
-        { "key": "Access-Control-Allow-Headers", "value": "Content-Type,Authorization,apikey,x-client-info,x-requested-with" }
-      ]
-    }
-  ],
   "redirects": [
     {
       "source": "/api/(?!v1)(.*)",
       "destination": "/api/v1/$1",
-      "permanent": false
+      "permanent": true
     }
   ],
   "rewrites": [
     {
       "source": "/api/v1/:path*",
       "destination": "/api/v1.js"
-    },
+    }
+  ],
+  "headers": [
     {
-      "source": "/api/v1",
-      "destination": "/api/v1.js"
+      "source": "/api/(.*)",
+      "headers": [
+        { "key": "Access-Control-Allow-Origin", "value": "*" },
+        { "key": "Access-Control-Allow-Methods", "value": "GET,POST,PUT,DELETE,OPTIONS,PATCH" },
+        { "key": "Access-Control-Allow-Headers", "value": "Content-Type,Authorization,apikey,x-client-info" },
+        { "key": "X-API-Version", "value": "5.0.0" }
+      ]
     }
   ]
 }
