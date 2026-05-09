@@ -1,0 +1,17 @@
+alter table if exists public.notifications add column if not exists clinic_id text;
+alter table if exists public.notifications add column if not exists target_patient_id text;
+alter table if exists public.notifications add column if not exists title text;
+alter table if exists public.notifications add column if not exists priority text default 'normal';
+alter table if exists public.notifications add column if not exists is_read boolean default false;
+alter table if exists public.notifications add column if not exists is_active boolean default true;
+alter table if exists public.notifications add column if not exists is_hidden boolean default false;
+alter table if exists public.notifications add column if not exists display_position text default 'top-right';
+alter table if exists public.notifications add column if not exists display_duration integer default 5;
+alter table if exists public.notifications add column if not exists font_size text default 'medium';
+alter table if exists public.notifications add column if not exists font_color text default '#FFFFFF';
+alter table if exists public.notifications add column if not exists background_color text default '#8A1538';
+alter table if exists public.notifications add column if not exists border_color text default '#C9A54C';
+alter table if exists public.notifications add column if not exists scheduled_at timestamptz;
+alter table if exists public.notifications add column if not exists sent_at timestamptz;
+alter table if exists public.notifications add column if not exists metadata jsonb default '{}'::jsonb;
+alter table if exists public.notifications add column if not exists updated_at timestamptz default now();
