@@ -47,19 +47,16 @@ alter table if exists public.notifications
   add column if not exists sent_at timestamptz,
   add column if not exists updated_at timestamptz default now();
 
--- 3) Keep the older "read" column available for legacy screens.
--- No destructive migration is applied here.
-
--- 4) Allow authenticated admin sessions to edit and delete notifications.
+-- 3) Allow authenticated admin sessions to edit and delete notifications.
 drop policy if exists "notifications_update_authenticated" on public.notifications;
 drop policy if exists "notifications_delete_authenticated" on public.notifications;
 drop policy if exists "notifications_update_admin" on public.notifications;
 drop policy if exists "notifications_delete_admin" on public.notifications;
-
 drop policy if exists "notifications update authenticated" on public.notifications;
 drop policy if exists "notifications delete authenticated" on public.notifications;
 
-action policy "notifications_update_authenticated" on public.notifications
+create policy "notifications_update_authenticated"
+  on public.notifications
   for update
   to authenticated
   using (true)
@@ -71,5 +68,5 @@ create policy "notifications_delete_authenticated"
   to authenticated
   using (true);
 
--- 5) Keep realtime enabled for the table.
+-- 4) Keep realtime enabled for the table.
 alter publication supabase_realtime add table if not exists public.notifications;
