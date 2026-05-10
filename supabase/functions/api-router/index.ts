@@ -126,6 +126,8 @@ async function forwardToFunction(functionName: string, req: Request): Promise<Re
     } else {
       headers.delete('Authorization')
     }
+    // Never forward internal control headers to downstream functions.
+    headers.delete('x-internal-api-key')
 
     const body = req.method === 'POST' || req.method === 'PUT' ? await req.text() : undefined
 

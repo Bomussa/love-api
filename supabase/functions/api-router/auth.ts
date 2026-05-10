@@ -35,9 +35,12 @@ export function resolveForwardAuthHeader(
   }
 
   if (isInternalServiceRoleAllowed(functionName, req, serviceRoleAllowlist, internalApiKey)) {
+    if (!serviceRoleKey) {
+      return { kind: 'unauthorized_internal', authorization: null }
+    }
     return {
       kind: 'internal_service',
-      authorization: serviceRoleKey ? `Bearer ${serviceRoleKey}` : null,
+      authorization: `Bearer ${serviceRoleKey}`,
     }
   }
 
