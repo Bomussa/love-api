@@ -3,7 +3,31 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-internal-secret',
+}
+
+const DENY_RESPONSE = { error: 'Access denied' }
+
+function deny(status = 403) {
+  return new Response(JSON.stringify(DENY_RESPONSE), {
+    status,
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+  })
+}
+
+function extractJwtRole(token: string): string | null {
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1] ?? ''))
+    return payload?.role ?? payload?.app_metadata?.role ?? null
+  } catch {
+    return null
+  }
+}
+
+function hasInternalSecret(req: Request): boolean {
+  const expected = Deno.env.get('INTERNAL_ADMIN_SECRET')
+  const provided = req.headers.get('x-internal-secret')
+  return Boolean(expected && provided && expected === provided)
 }
 
 interface ApiLog {
@@ -52,24 +76,23 @@ serve(async (req) => {
     )
 
     const authHeader = req.headers.get('Authorization')
-    if (!authHeader) {
-      return new Response(
-        JSON.stringify({ error: 'Missing authorization header' }),
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+    if (!authHeader || !authHeader.startsWith('Bearer ') || !hasInternalSecret(req)) {
+      return deny()
     }
 
     const token = authHeader.replace('Bearer ', '')
+    const jwtRole = extractJwtRole(token)
+    if (jwtRole !== 'admin' && jwtRole !== 'service_role') {
+      return deny()
+    }
+
     const { data: { user }, error: authError } = await supabaseClient.auth.getUser(token)
 
     if (authError || !user) {
-      return new Response(
-        JSON.stringify({ error: 'Unauthorized' }),
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+      return deny()
     }
 
-    // التحقق من أن المستخدم إداري
+    // طبقة تحقق إضافية: المستخدم موجود في جدول الإداريين
     const { data: admin } = await supabaseClient
       .from('admins')
       .select('id')
@@ -77,15 +100,17 @@ serve(async (req) => {
       .single()
 
     if (!admin) {
-      return new Response(
-        JSON.stringify({ error: 'Access denied. Admin only.' }),
-        { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+      return deny()
     }
 
     const url = new URL(req.url)
     const path = url.pathname
     const method = req.method
+
+    // رفض افتراضي: لا يُسمح بالتنفيذ إلا إذا كانت كل طبقات الحماية مكتملة + التفعيل الداخلي
+    if (Deno.env.get('API_ENABLED') !== 'true') {
+      return deny()
+    }
 
     let response: any
     let apiName = ''
@@ -243,7 +268,7 @@ serve(async (req) => {
     const executionTime = Date.now() - startTime
     
     return new Response(
-      JSON.stringify({ error: error.message }),
+      JSON.stringify(DENY_RESPONSE),
       { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   }
