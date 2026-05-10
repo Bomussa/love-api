@@ -1,6 +1,5 @@
 // @ts-nocheck
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
@@ -13,12 +12,6 @@ serve(async (req) => {
     if (req.method === 'OPTIONS') {
         return new Response('ok', { headers: corsHeaders })
     }
-
-    // Initialize Supabase Client
-    const supabaseClient = createClient(
-        Deno.env.get('SUPABASE_URL') ?? '',
-        Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-    )
 
     try {
         const url = new URL(req.url)
@@ -105,23 +98,18 @@ serve(async (req) => {
 // Helper to forward request to another Edge Function
 async function forwardToFunction(functionName: string, req: Request): Promise<Response> {
     const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
-    const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     
     const targetUrl = `${supabaseUrl}/functions/v1/${functionName}`
     
     console.log(`[api-router] Forwarding to: ${targetUrl}`)
 
     try {
-        // Clone headers but remove host/connection specific ones
+        // Router acts only as a transport/proxy layer.
+        // AuthN/AuthZ ownership lives in the target function + Supabase RLS/policies.
+        // DO NOT elevate privileges here (e.g., do not inject service-role Authorization).
         const headers = new Headers(req.headers)
-        headers.set('Authorization', `Bearer ${serviceKey}`) // Use service key for internal calls? Or pass through?
-        // Better to pass through user token if present, else service key?
-        // For 'patient-login', it's public. For 'queue-enter', it needs token.
-        // Let's rely on the function's own auth check.
-        // But functions run with 'service_role' by default if invoked via admin API.
-        // If we fetch directly, we need to pass Auth.
-        
-        // However, we are proxying.
+
+        // Preserve caller context as-is so downstream auth checks evaluate the real caller.
         const body = req.method === 'POST' || req.method === 'PUT' ? await req.text() : undefined
         
         const response = await fetch(targetUrl, {
