@@ -2,11 +2,11 @@
  * v1 Status Endpoint
  * Used by maintenance checks to determine the API health state.
  */
+import { resolveCorsHeaders } from '../../lib/cors-policy.js';
 
 export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, apikey, x-client-info');
+  const corsHeaders = resolveCorsHeaders({ origin: req.headers.origin, category: 'status' });
+  Object.entries(corsHeaders).forEach(([k, v]) => res.setHeader(k, v));
   res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
   res.setHeader('X-API-Version', '5.0.0');
 
