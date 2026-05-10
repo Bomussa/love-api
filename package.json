@@ -19,7 +19,10 @@
     "check:queue-contract": "node scripts/check-queue-contract.js",
     "check:endpoint-contracts": "node scripts/check-endpoint-contracts.js",
     "check:schema-contract": "node scripts/check-schema-contract.js",
-    "test:smoke:mmc": "bash scripts/smoke-mmc-domains.sh"
+    "test:smoke:mmc": "bash scripts/smoke-mmc-domains.sh",
+    "check:module-style": "node scripts/check-module-style.js",
+    "test:imports": "node --test tests/module-import-smoke.test.js",
+    "ci:modules": "npm run check:module-style && npm run test:imports"
   },
   "devDependencies": {
     "vitest": "^4.1.0"
