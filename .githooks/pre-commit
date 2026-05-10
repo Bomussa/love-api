@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if ! command -v gitleaks >/dev/null 2>&1; then
+  echo "gitleaks is not installed. Install it to enable pre-commit secret scanning."
+  echo "Skipping local secret scan; CI will still enforce this check."
+  exit 0
+fi
+
+echo "Running gitleaks on staged changes..."
+gitleaks protect --staged --redact --config .gitleaks.toml
