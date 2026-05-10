@@ -65,3 +65,31 @@ Deno.test('forward auth rejects unauthorized admin endpoint escalation without c
   if (resolution.kind !== 'unauthorized_internal') throw new Error(`expected unauthorized_internal, got ${resolution.kind}`)
   if (resolution.authorization !== null) throw new Error('expected authorization to remain null')
 })
+
+Deno.test('forward auth does not escalate public endpoint even if internal key header is present', () => {
+  const allowlist = new Set(['api-v1-status'])
+  const req = new Request('https://example.com', {
+    headers: {
+      'x-internal-api-key': 'internal-key',
+    },
+  })
+
+  const resolution = resolveForwardAuthHeader('queue-enter', req, allowlist, 'internal-key', 'service-role')
+
+  if (resolution.kind !== 'none') throw new Error(`expected none, got ${resolution.kind}`)
+  if (resolution.authorization !== null) throw new Error('expected no authorization header for public endpoint')
+})
+
+Deno.test('forward auth rejects internal allowlisted route when service role key is missing', () => {
+  const allowlist = new Set(['api-v1-status'])
+  const req = new Request('https://example.com', {
+    headers: {
+      'x-internal-api-key': 'internal-key',
+    },
+  })
+
+  const resolution = resolveForwardAuthHeader('api-v1-status', req, allowlist, 'internal-key', '')
+
+  if (resolution.kind !== 'unauthorized_internal') throw new Error(`expected unauthorized_internal, got ${resolution.kind}`)
+  if (resolution.authorization !== null) throw new Error('expected no authorization header when service role key missing')
+})
