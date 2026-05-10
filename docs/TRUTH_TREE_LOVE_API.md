@@ -98,3 +98,5 @@ love-api/
 - يستخدم `fetch` مباشرة لاستدعاء Supabase REST API
 - يوجد `supabaseRPC()` لاستدعاء دوال قاعدة البيانات
 - يوجد `getNextDisplayNumber()` غير ذري (خطر race condition)
+
+<!-- redeploy trigger: stable snapshot restored -->
