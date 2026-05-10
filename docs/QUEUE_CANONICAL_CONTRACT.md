@@ -54,3 +54,12 @@
 
 ## Engineering rule
 All application reads/writes must target `public.queues` only. Any new direct usage of `.from('queue')` or `.from('unified_queue')` is considered a contract violation, except within explicit compatibility-layer code.
+
+
+## Canonical operations layer (API + Functions)
+- `queue status` → path `/api/v1/queue/status` → canonical function `queue-status`.
+- `queue enter` → path `/api/v1/queue/enter` → canonical function `queue-enter`.
+- `queue call` → path `/api/v1/queue/call` → canonical function `call-next-patient` (legacy `queue-call` is now a forward-only wrapper).
+- `pin verify` → path `/api/v1/pin/verify` → canonical behavior uses the same PIN validation source used by `call-next-patient` via `_shared/pin-service.js`.
+
+All secondary entry points must call the canonical source only and must not duplicate queue business logic.
