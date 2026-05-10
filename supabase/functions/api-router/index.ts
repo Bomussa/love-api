@@ -1,7 +1,7 @@
 // @ts-nocheck
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { hasAuthOrSession, isInternalServiceRoleAllowed } from './auth.ts'
+import { hasAuthOrSession, resolveForwardAuthHeader } from './auth.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -111,21 +111,20 @@ async function forwardToFunction(functionName: string, req: Request): Promise<Re
 
   try {
     const headers = new Headers(req.headers)
-    const authorization = req.headers.get('authorization')
+    const authResolution = resolveForwardAuthHeader(functionName, req, serviceRoleAllowlist, INTERNAL_API_KEY, serviceKey)
 
-    if (authorization) {
-      headers.set('Authorization', authorization)
+    if (authResolution.kind === 'unauthorized_internal') {
+      console.warn(`[api-router][security] Rejected service-role escalation. function=${functionName}`)
+      return new Response(
+        JSON.stringify({ success: false, error: 'Unauthorized internal request' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+      )
+    }
+
+    if (authResolution.authorization) {
+      headers.set('Authorization', authResolution.authorization)
     } else {
       headers.delete('Authorization')
-      if (isInternalServiceRoleAllowed(functionName, req, serviceRoleAllowlist, INTERNAL_API_KEY)) {
-        headers.set('Authorization', `Bearer ${serviceKey}`)
-      } else if (serviceRoleAllowlist.has(functionName)) {
-        console.warn(`[api-router][security] Rejected service-role escalation. function=${functionName}`)
-        return new Response(
-          JSON.stringify({ success: false, error: 'Unauthorized internal request' }),
-          { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
-        )
-      }
     }
 
     const body = req.method === 'POST' || req.method === 'PUT' ? await req.text() : undefined
@@ -144,4 +143,3 @@ async function forwardToFunction(functionName: string, req: Request): Promise<Re
     throw new Error(`Failed to invoke ${functionName}: ${e.message}`)
   }
 }
-
