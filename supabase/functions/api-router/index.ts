@@ -53,6 +53,14 @@ serve(async (req) => {
       return await forwardToFunction('events-stream', req)
     }
 
+    if (path === 'ai/chat' && req.method === 'POST') {
+      if (!hasAuthOrSession(req)) {
+        return unauthorized('ai/chat', req.method)
+      }
+
+      return await forwardToFunction('gemini-chat', req)
+    }
+
     if (path === 'admin/status' && req.method === 'GET') {
       if (!hasAuthOrSession(req)) {
         return unauthorized('admin/status', req.method)
