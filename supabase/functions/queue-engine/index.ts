@@ -166,7 +166,7 @@ serve(async (req: Request) => {
         break;
       }
       case 'get_queue_status': {
-        const { data: queueData, error: queueError } = await serviceClient.rpc('get_queue_status_safe', {
+        const { data: queueData, error: queueError } = await serviceClient.rpc('get_queue_status', {
           p_clinic_id: clinic_id,
         });
 
