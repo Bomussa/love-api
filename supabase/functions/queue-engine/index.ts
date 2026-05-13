@@ -166,29 +166,12 @@ serve(async (req: Request) => {
         break;
       }
       case 'get_queue_status': {
-        const { data: queueData, error: queueError } = await serviceClient
-          .from('queues')
-          .select('*')
-          .eq('clinic_id', clinic_id)
-          .gte('entered_at', new Date().toISOString().split('T')[0])
-          .order('display_number', { ascending: true });
+        const { data: queueData, error: queueError } = await serviceClient.rpc('get_queue_status_safe', {
+          p_clinic_id: clinic_id,
+        });
 
         if (queueError) throw queueError;
-
-        const waiting = queueData?.filter((q) => q.status === 'WAITING') || [];
-        const serving = queueData?.filter((q) => q.status === 'CALLED' || q.status === 'IN_PROGRESS') || [];
-        const completed = queueData?.filter((q) => q.status === 'DONE') || [];
-
-        result = {
-          status: 'OK',
-          clinic_id,
-          waiting_count: waiting.length,
-          serving_count: serving.length,
-          completed_count: completed.length,
-          current_number: serving[0]?.display_number || null,
-          last_number: queueData?.[queueData.length - 1]?.display_number || 0,
-          queue: queueData,
-        };
+        result = queueData;
         break;
       }
       default:
