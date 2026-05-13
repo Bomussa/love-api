@@ -45,6 +45,7 @@ const REQUIRED_ROUTES = [
   '/api/v1/queue/enter',
   '/api/v1/queue/status',
   '/api/v1/queue/call',
+  '/api/v1/queue/advance',
   '/api/v1/pin/verify',
   '/api/v1/qa/deep_run',
 ];
