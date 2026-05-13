@@ -72,30 +72,13 @@ serve(async (req: Request) => {
       );
     }
 
-    // استخدام الدالة الأساسية المتوافقة مع العقد الحالي
-    const tryRpc = async (fnName: string) => {
-      return await db.rpc(fnName, {
-        p_clinic_id: clinic_id,
-        p_patient_id: patient_id,
-        p_patient_name: patient_name,
-        p_exam_type: exam_type,
-      });
-    };
-
-    // ترتيب محاولات RPC من الأحدث إلى الأقدم لضمان التوافق
-    const rpcCandidates = ['enter_unified_queue_safe', 'enter_queue_safe', 'enter_queue_v2'];
-    let result: any = null;
-    let rpcError: any = null;
-
-    for (const fnName of rpcCandidates) {
-      const rpcResponse = await tryRpc(fnName);
-      if (!rpcResponse.error) {
-        result = rpcResponse.data;
-        rpcError = null;
-        break;
-      }
-      rpcError = rpcResponse.error;
-    }
+    // استخدام المسار الرسمي الوحيد لتفادي أي wrapper mutation متداخل
+    const { data: result, error: rpcError } = await db.rpc('enter_queue_safe', {
+      p_clinic_id: clinic_id,
+      p_patient_id: patient_id,
+      p_patient_name: patient_name,
+      p_exam_type: exam_type,
+    });
 
     if (rpcError) throw rpcError;
 
