@@ -72,6 +72,7 @@ export function isKnownV1Route(pathname) {
     pathname === '/api/v1/queue/enter' ||
     pathname === '/api/v1/queue/status' ||
     pathname === '/api/v1/queue/call' ||
+    pathname === '/api/v1/queue/advance' ||
     pathname === '/api/v1/pin/verify' ||
     pathname === '/api/v1/qa/deep_run'
   );
