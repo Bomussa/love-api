@@ -1,12 +1,7 @@
 // @ts-nocheck
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { hasAuthOrSession, resolveForwardAuthHeader } from './auth.ts'
-
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-internal-api-key',
-  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-}
+import { buildCorsHeaders, handleOptions } from '../_shared/cors.ts'
 
 const INTERNAL_API_KEY = Deno.env.get('INTERNAL_API_KEY') ?? ''
 
@@ -15,10 +10,12 @@ const serviceRoleAllowlist = new Set<string>([
   'api-v1-status',
 ])
 
-
 serve(async (req) => {
+  const origin = req.headers.get('origin') ?? undefined
+  const corsHeaders = buildCorsHeaders(origin, 'write')
+
   if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders })
+    return handleOptions(origin, 'write')
   }
 
   try {
@@ -30,57 +27,57 @@ serve(async (req) => {
     console.log(`[api-router] Request path: ${path}, Method: ${req.method}`)
 
     if (path === 'queue/enter' && req.method === 'POST') {
-      return await forwardToFunction('queue-enter', req)
+      return await forwardToFunction('queue-enter', req, corsHeaders)
     }
 
     if (path === 'patient/login' && req.method === 'POST') {
-      return await forwardToFunction('patient-login', req)
+      return await forwardToFunction('patient-login', req, corsHeaders)
     }
 
     if (path === 'queue/call' && req.method === 'POST') {
-      return await forwardToFunction('call-next-patient', req)
+      return await forwardToFunction('call-next-patient', req, corsHeaders)
     }
 
     if (path === 'pin/generate' && req.method === 'POST') {
-      return await forwardToFunction('issue-pin', req)
+      return await forwardToFunction('issue-pin', req, corsHeaders)
     }
 
     if (path === 'queue/status' && req.method === 'GET') {
-      return await forwardToFunction('queue-status', req)
+      return await forwardToFunction('queue-status', req, corsHeaders)
     }
 
     if (path === 'events/stream' && req.method === 'GET') {
-      return await forwardToFunction('events-stream', req)
+      return await forwardToFunction('events-stream', req, corsHeaders)
     }
 
     if (path === 'ai/chat' && req.method === 'POST') {
       if (!hasAuthOrSession(req)) {
-        return unauthorized('ai/chat', req.method)
+        return unauthorized('ai/chat', req.method, corsHeaders)
       }
 
-      return await forwardToFunction('gemini-chat', req)
+      return await forwardToFunction('gemini-chat', req, corsHeaders)
     }
 
     if (path === 'admin/status' && req.method === 'GET') {
       if (!hasAuthOrSession(req)) {
-        return unauthorized('admin/status', req.method)
+        return unauthorized('admin/status', req.method, corsHeaders)
       }
-      return await forwardToFunction('api-v1-status', req)
+      return await forwardToFunction('api-v1-status', req, corsHeaders)
     }
 
     if (path === 'pin/status' && req.method === 'GET') {
-      return await forwardToFunction('pin-status', req)
+      return await forwardToFunction('pin-status', req, corsHeaders)
     }
 
     if (path === 'admin/login' && req.method === 'POST') {
-      return await forwardToFunction('admin-login', req)
+      return await forwardToFunction('admin-login', req, corsHeaders)
     }
 
     if (path === 'admin/session/verify' && req.method === 'POST') {
       if (!hasAuthOrSession(req)) {
-        return unauthorized('admin/session/verify', req.method)
+        return unauthorized('admin/session/verify', req.method, corsHeaders)
       }
-      return await forwardToFunction('admin-session-verify', req)
+      return await forwardToFunction('admin-session-verify', req, corsHeaders)
     }
 
     return new Response(
@@ -96,7 +93,7 @@ serve(async (req) => {
   }
 })
 
-function unauthorized(path: string, method: string): Response {
+function unauthorized(path: string, method: string, corsHeaders: Record<string, string>): Response {
   console.warn(`[api-router][security] Rejected unauthorized admin request. path=${path} method=${method}`)
   return new Response(
     JSON.stringify({ success: false, error: 'Unauthorized' }),
@@ -104,7 +101,7 @@ function unauthorized(path: string, method: string): Response {
   )
 }
 
-async function forwardToFunction(functionName: string, req: Request): Promise<Response> {
+async function forwardToFunction(functionName: string, req: Request, corsHeaders: Record<string, string>): Promise<Response> {
   const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
   const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
   const targetUrl = `${supabaseUrl}/functions/v1/${functionName}`
@@ -137,9 +134,12 @@ async function forwardToFunction(functionName: string, req: Request): Promise<Re
       body,
     })
 
+    const responseHeaders = new Headers(response.headers)
+    Object.entries(corsHeaders).forEach(([key, value]) => responseHeaders.set(key, value))
+
     return new Response(response.body, {
       status: response.status,
-      headers: response.headers,
+      headers: responseHeaders,
     })
   } catch (e) {
     throw new Error(`Failed to invoke ${functionName}: ${e.message}`)
