@@ -1,19 +1,16 @@
 import { serve } from "https://deno.land/std/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { resolveCorsHeaders } from '../../../lib/cors-policy.js';
+import { buildCorsHeaders, handleOptions } from '../_shared/cors.ts';
 
 function getCorsHeaders(req: Request) {
-  return resolveCorsHeaders({
-    origin: req.headers.get('origin') ?? undefined,
-    category: 'write',
-  });
+  return buildCorsHeaders(req.headers.get('origin') ?? undefined, 'write');
 }
 
 serve(async (req: Request) => {
   const corsHeaders = getCorsHeaders(req);
 
   if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders });
+    return handleOptions(req.headers.get('origin') ?? undefined, 'write');
   }
 
   try {
@@ -27,12 +24,10 @@ serve(async (req: Request) => {
       throw new Error('Military ID and name are required');
     }
 
-    // Create Supabase client
     const supabaseUrl = Deno.env.get('SUPABASE_URL') || '';
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    // Check if patient exists or create new one
     const { data: existingPatient } = await supabase
       .from('patients')
       .select('*')
@@ -43,7 +38,6 @@ serve(async (req: Request) => {
     if (existingPatient) {
       patient = existingPatient;
     } else {
-      // Create new patient
       const { data: newPatient, error: createError } = await supabase
         .from('patients')
         .insert({
@@ -59,16 +53,14 @@ serve(async (req: Request) => {
       patient = newPatient;
     }
 
-    // Generate session token (simple implementation)
     const token = `mmc_${patient.id}_${Date.now()}`;
 
-    // Store session
     const { error: sessionError } = await supabase
       .from('patient_sessions')
       .insert({
         patient_id: patient.id,
         token: token,
-        expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() // 24 hours
+        expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
       });
 
     if (sessionError) throw sessionError;
