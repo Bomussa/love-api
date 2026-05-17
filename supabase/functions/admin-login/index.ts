@@ -1,12 +1,14 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.3';
 import { scryptSync, timingSafeEqual } from 'node:crypto';
+import { resolveCorsHeaders } from '../../../lib/cors-policy.js';
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS'
-};
+function getCorsHeaders(req: Request) {
+  return resolveCorsHeaders({
+    origin: req.headers.get('origin') ?? undefined,
+    category: 'write',
+  });
+}
 
 function verifyPasswordHash(password: string, passwordHash?: string | null) {
   if (!passwordHash || !passwordHash.includes(':')) return false;
@@ -20,6 +22,8 @@ function verifyPasswordHash(password: string, passwordHash?: string | null) {
 }
 
 serve(async (req) => {
+  const corsHeaders = getCorsHeaders(req);
+
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
