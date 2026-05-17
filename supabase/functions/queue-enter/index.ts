@@ -2,26 +2,26 @@
 // دخول الطابور مع القفل التنافسي والإضافات الحرجة
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { buildCorsHeaders, handleOptions } from '../_shared/cors.ts';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-};
+function getCorsHeaders(req: Request) {
+  return buildCorsHeaders(req.headers.get('origin') ?? undefined, 'write');
+}
 
 serve(async (req: Request) => {
+  const corsHeaders = getCorsHeaders(req);
+
   if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders });
+    return handleOptions(req.headers.get('origin') ?? undefined, 'write');
   }
 
   try {
     const db = createClient(SUPABASE_URL, SERVICE_KEY);
     const body = await req.json();
 
-    // Support both naming conventions
     const clinic_id = body.clinic_id || body.clinic;
     const patient_id = body.patient_id || body.user;
     const patient_name = body.patient_name || body.name || patient_id;
@@ -34,7 +34,6 @@ serve(async (req: Request) => {
       );
     }
 
-    // التحقق من Kill Switch العام
     const { data: configData } = await db
       .from('system_config')
       .select('value')
@@ -53,7 +52,6 @@ serve(async (req: Request) => {
       );
     }
 
-    // التحقق من حالة العيادة
     const { data: clinicData } = await db
       .from('clinics')
       .select('system_enabled, is_active')
@@ -72,7 +70,6 @@ serve(async (req: Request) => {
       );
     }
 
-    // استخدام المسار الرسمي الوحيد لتفادي أي wrapper mutation متداخل
     const { data: result, error: rpcError } = await db.rpc('enter_queue_safe', {
       p_clinic_id: clinic_id,
       p_patient_id: patient_id,
@@ -82,7 +79,6 @@ serve(async (req: Request) => {
 
     if (rpcError) throw rpcError;
 
-    // التحقق من نتيجة الدالة الآمنة
     if (result?.status === 'ABORTED') {
       return new Response(
         JSON.stringify({
