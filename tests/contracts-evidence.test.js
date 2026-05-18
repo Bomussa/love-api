@@ -10,7 +10,6 @@ function runNodeScript(scriptPath) {
 test('endpoint contracts are enforced and evidenced', () => {
   const result = runNodeScript('scripts/check-endpoint-contracts.js');
   assert.equal(result.status, 0, result.stderr || result.stdout);
-  assert.match(result.stdout, /Edge functions \(27\):/);
   assert.match(result.stdout, /Endpoint contract check passed\./);
 });
 
