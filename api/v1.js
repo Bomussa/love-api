@@ -1,7 +1,7 @@
 const QUEUE_STATUS = Object.freeze({
   WAITING: 'WAITING',
-  IN_SERVICE: 'IN_SERVICE',
-  DONE: 'DONE',
+  CALLED: 'CALLED',
+  COMPLETED: 'COMPLETED',
   CANCELLED: 'CANCELLED',
 });
 
@@ -60,8 +60,6 @@ export function getNextClinicInRoute({ examType, gender, currentClinicId }) {
 
 export { QUEUE_STATUS };
 
-
-// Keep explicit route literals for contract checks and compatibility tooling.
 export function isKnownV1Route(pathname) {
   return (
     pathname === '/api/v1/health' ||
@@ -73,7 +71,6 @@ export function isKnownV1Route(pathname) {
     pathname === '/api/v1/queue/status' ||
     pathname === '/api/v1/queue/call' ||
     pathname === '/api/v1/queue/advance' ||
-
     pathname === '/api/v1/qa/deep_run'
   );
 }
