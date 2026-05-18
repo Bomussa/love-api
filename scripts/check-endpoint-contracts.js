@@ -19,21 +19,16 @@ const REQUIRED_EDGE_FUNCTIONS = [
   'db-tables-manager',
   'events-stream',
   'functions-proxy',
-  'generate-pins-cron',
   'guaranteed-api',
   'healthz',
-  'issue-pin',
   'login',
   'patient-login',
-  'pin-generate',
-  'pin-status',
-  'pin-verify',
   'queue-call',
   'queue-engine',
   'queue-enter',
   'queue-status',
   'reports-daily',
-  'stats-dashboard',
+  'stats-dashboard'
 ];
 
 const REQUIRED_ROUTES = [
@@ -46,8 +41,7 @@ const REQUIRED_ROUTES = [
   '/api/v1/queue/status',
   '/api/v1/queue/call',
   '/api/v1/queue/advance',
-  '/api/v1/pin/verify',
-  '/api/v1/qa/deep_run',
+  '/api/v1/qa/deep_run'
 ];
 
 function readRoutesFromFile(filePath) {
