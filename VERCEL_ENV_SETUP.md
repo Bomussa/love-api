@@ -11,10 +11,11 @@
 
 ```bash
 SUPABASE_URL=https://rujwuruuosffcxazymit.supabase.co
-SUPABASE_SERVICE_ROLE=<service-role-key>
+SUPABASE_SERVICE_ROLE_KEY=<service-role-key>
+SUPABASE_ANON_KEY=<anon-key>
 ```
 
-> يدعم الكود أيضًا fallback إلى `SUPABASE_ANON_KEY`، لكن الإنتاج يجب أن يعتمد `SUPABASE_SERVICE_ROLE` على السيرفر فقط.
+> ملاحظة: لم يعد هناك أي fallback URL/Key صامت. أي نقص في المتغيرات أعلاه سيؤدي إلى فشل startup بشكل صريح.
 
 ---
 
@@ -79,6 +80,21 @@ NEXT_PUBLIC_RETRY_BACKOFF_MS=500
 
 ## 6) أمان
 
-- لا تضع `SUPABASE_SERVICE_ROLE` في الفرونت أو في `NEXT_PUBLIC_*`.
+- لا تضع `SUPABASE_SERVICE_ROLE_KEY` في الفرونت أو في `NEXT_PUBLIC_*`.
 - لا ترفع secrets إلى GitHub.
 - فعّل key rotation دوريًا.
+
+
+## 7) Startup Validation (إجباري)
+
+الخدمة ترفض التشغيل إذا غاب أي متغير إلزامي:
+
+- Backend (`love-api`):
+  - `SUPABASE_URL`
+  - `SUPABASE_SERVICE_ROLE_KEY` (أو `SUPABASE_KEY` فقط للتوافق الخلفي داخل بعض الوحدات)
+  - `SUPABASE_ANON_KEY` للوحدات العامة التي تستدعي Edge Functions.
+- Frontend (`love`):
+  - `VITE_SUPABASE_URL`
+  - `VITE_SUPABASE_ANON_KEY`
+
+ينطبق ذلك على بيئات `Production` و`Preview` و`Development`.

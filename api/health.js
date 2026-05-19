@@ -1,7 +1,13 @@
+import { validateStartupEnv } from '../lib/env.js';
 /**
  * Health Check Endpoint
  * Returns the current status of the API server
  */
+
+validateStartupEnv([
+  { key: 'SUPABASE_URL' },
+  { key: 'SUPABASE_SERVICE_ROLE_KEY', aliases: ['SUPABASE_KEY'] },
+]);
 
 export default async function handler(req, res) {
   // CORS headers

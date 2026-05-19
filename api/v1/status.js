@@ -1,8 +1,14 @@
+import { validateStartupEnv } from '../../lib/env.js';
 /**
  * v1 Status Endpoint
  * Used by maintenance checks to determine the API health state.
  */
 import { resolveCorsHeaders } from '../../lib/cors-policy.js';
+
+validateStartupEnv([
+  { key: 'SUPABASE_URL' },
+  { key: 'SUPABASE_SERVICE_ROLE_KEY', aliases: ['SUPABASE_KEY'] },
+]);
 
 export default async function handler(req, res) {
   const corsHeaders = resolveCorsHeaders({ origin: req.headers.origin, category: 'status' });
