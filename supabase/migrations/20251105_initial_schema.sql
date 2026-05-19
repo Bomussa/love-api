@@ -221,12 +221,19 @@ ALTER TABLE reports ENABLE ROW LEVEL SECURITY;
 ALTER TABLE audit_log ENABLE ROW LEVEL SECURITY;
 
 -- Policies for public access (anon key)
--- Patients can read their own data
+-- Patients can read only their own data via JWT claim patient_id.
+-- service_role always bypasses these checks.
 CREATE POLICY "Patients can view their own data" ON patients
-  FOR SELECT USING (true);
+  FOR SELECT USING (
+    (auth.jwt() ->> 'role') = 'service_role'
+    OR (auth.jwt() ->> 'patient_id') = patient_id
+  );
 
 CREATE POLICY "Patients can insert their own data" ON patients
-  FOR INSERT WITH CHECK (true);
+  FOR INSERT WITH CHECK (
+    (auth.jwt() ->> 'role') = 'service_role'
+    OR (auth.jwt() ->> 'patient_id') = patient_id
+  );
 
 -- Clinics are publicly readable
 CREATE POLICY "Clinics are publicly readable" ON clinics
@@ -234,30 +241,60 @@ CREATE POLICY "Clinics are publicly readable" ON clinics
 
 -- Queues policies
 CREATE POLICY "Users can view queues" ON queues
-  FOR SELECT USING (true);
+  FOR SELECT USING (
+    (auth.jwt() ->> 'role') = 'service_role'
+    OR (auth.jwt() ->> 'patient_id') = patient_id
+  );
 
 CREATE POLICY "Users can insert into queues" ON queues
-  FOR INSERT WITH CHECK (true);
+  FOR INSERT WITH CHECK (
+    (auth.jwt() ->> 'role') = 'service_role'
+    OR (auth.jwt() ->> 'patient_id') = patient_id
+  );
 
 CREATE POLICY "Users can update their queue entries" ON queues
-  FOR UPDATE USING (true);
+  FOR UPDATE USING (
+    (auth.jwt() ->> 'role') = 'service_role'
+    OR (auth.jwt() ->> 'patient_id') = patient_id
+  ) WITH CHECK (
+    (auth.jwt() ->> 'role') = 'service_role'
+    OR (auth.jwt() ->> 'patient_id') = patient_id
+  );
 
 -- Pathways policies
 CREATE POLICY "Users can view pathways" ON pathways
-  FOR SELECT USING (true);
+  FOR SELECT USING (
+    (auth.jwt() ->> 'role') = 'service_role'
+    OR (auth.jwt() ->> 'patient_id') = patient_id
+  );
 
 CREATE POLICY "Users can insert pathways" ON pathways
-  FOR INSERT WITH CHECK (true);
+  FOR INSERT WITH CHECK (
+    (auth.jwt() ->> 'role') = 'service_role'
+    OR (auth.jwt() ->> 'patient_id') = patient_id
+  );
 
 CREATE POLICY "Users can update pathways" ON pathways
-  FOR UPDATE USING (true);
+  FOR UPDATE USING (
+    (auth.jwt() ->> 'role') = 'service_role'
+    OR (auth.jwt() ->> 'patient_id') = patient_id
+  ) WITH CHECK (
+    (auth.jwt() ->> 'role') = 'service_role'
+    OR (auth.jwt() ->> 'patient_id') = patient_id
+  );
 
 -- Notifications policies
 CREATE POLICY "Users can view notifications" ON notifications
-  FOR SELECT USING (true);
+  FOR SELECT USING (
+    (auth.jwt() ->> 'role') = 'service_role'
+    OR (auth.jwt() ->> 'patient_id') = patient_id
+  );
 
 CREATE POLICY "Users can insert notifications" ON notifications
-  FOR INSERT WITH CHECK (true);
+  FOR INSERT WITH CHECK (
+    (auth.jwt() ->> 'role') = 'service_role'
+    OR (auth.jwt() ->> 'patient_id') = patient_id
+  );
 
 -- Reports are publicly readable
 CREATE POLICY "Reports are publicly readable" ON reports
@@ -407,7 +444,6 @@ GRANT ALL ON ALL FUNCTIONS IN SCHEMA public TO postgres, service_role;
 
 -- Grant read access to anon role
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO anon;
-GRANT INSERT, UPDATE ON patients, queues, pathways, notifications TO anon;
 
 -- ============================================
 -- COMMENTS
