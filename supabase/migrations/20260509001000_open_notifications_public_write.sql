@@ -10,15 +10,15 @@ drop policy if exists "notifications_delete_public" on public.notifications;
 drop policy if exists "notifications update public" on public.notifications;
 drop policy if exists "notifications delete public" on public.notifications;
 
-create policy "notifications_update_public"
+create policy "notifications_update_service_role"
   on public.notifications
   for update
-  to public
+  to service_role
   using (true)
   with check (true);
 
-create policy "notifications_delete_public"
+create policy "notifications_delete_service_role"
   on public.notifications
   for delete
-  to public
+  to service_role
   using (true);

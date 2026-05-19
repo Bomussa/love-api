@@ -26,4 +26,5 @@ BEFORE UPDATE ON public.doctors
 FOR EACH ROW
 EXECUTE FUNCTION update_updated_at_column();
 
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.doctors TO anon, service_role;
+GRANT SELECT ON public.doctors TO anon;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.doctors TO service_role;
