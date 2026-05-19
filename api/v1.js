@@ -1,76 +1,41 @@
-const QUEUE_STATUS = Object.freeze({
-  WAITING: 'WAITING',
-  CALLED: 'CALLED',
-  COMPLETED: 'COMPLETED',
-  CANCELLED: 'CANCELLED',
-});
+/**
+ * V1 API Entry Point - Serverless Router
+ * 
+ * @module api/v1
+ * @description Main router for the Military Medical Committee API (v1).
+ * Handles routing, body parsing, and global error handling.
+ */
 
-const CLINIC_ROUTES = Object.freeze({
-  recruitment: {
-    male: ['LAB', 'XR', 'EYE', 'DNT'],
-    female: ['LAB', 'XR', 'EYE', 'DNT'],
-  },
-});
+import handler from '../lib/api-handlers.js';
+import { parseBody, setCorsHeaders, handleError } from '../lib/helpers-enhanced.js';
 
-function resolveRoute(examType, gender) {
-  const typeKey = String(examType || '').toLowerCase();
-  const genderKey = String(gender || '').toLowerCase();
-  const typeRoutes = CLINIC_ROUTES[typeKey] || {};
-  return typeRoutes[genderKey] || typeRoutes.male || [];
-}
+/**
+ * Main Serverless Function Handler
+ */
+export default async function (req, res) {
+  try {
+    // 1. Set global CORS headers
+    setCorsHeaders(res, req);
 
-export async function invokeRpcSafe(supabase, functionName, payload = {}) {
-  const { data, error } = await supabase.rpc(functionName, payload);
+    // 2. Handle preflight OPTIONS request
+    if (req.method === 'OPTIONS') {
+      return res.status(200).end();
+    }
 
-  if (!error) {
-    return { ok: true, data };
+    // 3. Pre-parse body for handlers if not already parsed
+    if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
+      try {
+        req._mmcParsedBody = await parseBody(req);
+      } catch (e) {
+        console.error('[V1_ROUTER] Body parse warning:', e.message);
+      }
+    }
+
+    // 4. Delegate to the main API handler
+    return await handler(req, res);
+
+  } catch (error) {
+    console.error('[V1_ROUTER] Fatal Error:', error);
+    return handleError(error, res);
   }
-
-  const missing = ['42883', 'PGRST202'].includes(error.code)
-    || /does not exist/i.test(String(error.message || ''));
-
-  return {
-    ok: false,
-    missing,
-    code: error.code || null,
-    error: error.message || 'Unknown RPC error',
-  };
-}
-
-export function getNextClinicInRoute({ examType, gender, currentClinicId }) {
-  const route = resolveRoute(examType, gender);
-  const current = String(currentClinicId || '').toUpperCase();
-
-  if (route.length === 0) {
-    return { nextClinicId: null, finished: true, route: [] };
-  }
-
-  const currentIndex = route.indexOf(current);
-  if (currentIndex < 0) {
-    return { nextClinicId: route[0], finished: false, route };
-  }
-
-  const nextClinicId = route[currentIndex + 1] || null;
-  return {
-    nextClinicId,
-    finished: nextClinicId === null,
-    route,
-  };
-}
-
-export { QUEUE_STATUS };
-
-export function isKnownV1Route(pathname) {
-  return (
-    pathname === '/api/v1/health' ||
-    pathname === '/api/v1/admin/login' ||
-    pathname === '/api/v1/admins' ||
-    pathname === '/api/v1/status' ||
-    pathname === '/api/v1/patient/login' ||
-    pathname === '/api/v1/queue/enter' ||
-    pathname === '/api/v1/queue/status' ||
-    pathname === '/api/v1/queue/call' ||
-    pathname === '/api/v1/queue/advance' ||
-    pathname === '/api/v1/qa/deep_run'
-  );
 }
