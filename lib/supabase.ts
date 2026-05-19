@@ -1,11 +1,13 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { getEnv, validateStartupEnv } from './env.js';
 
-const supabaseUrl = Deno.env.get('SUPABASE_URL') || '';
-const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
+validateStartupEnv([
+  { key: 'SUPABASE_URL' },
+  { key: 'SUPABASE_SERVICE_ROLE_KEY', aliases: ['SUPABASE_KEY'] },
+]);
 
-if (!supabaseUrl || !supabaseServiceKey) {
-  throw new Error('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be configured');
-}
+const supabaseUrl = getEnv('SUPABASE_URL', { required: true, context: 'Supabase Edge client' });
+const supabaseServiceKey = getEnv('SUPABASE_SERVICE_ROLE_KEY', { required: true, aliases: ['SUPABASE_KEY'], context: 'Supabase Edge privileged client' });
 
 export const supabase = createClient(supabaseUrl, supabaseServiceKey, {
   auth: {
