@@ -1,0 +1,35 @@
+# Production-authorized migration chain (authoritative)
+#
+# Only these files are allowed in the production deployment path.
+# Files under legacy/ and any SQL file not listed here are excluded from
+# the production execution chain unless this file is updated in the same PR.
+
+20250101000000_enable_realtime_and_cron.sql
+20251102_login_audit.sql
+20251105_initial_schema.sql
+20251112_full_schema.sql
+2025-11-07_queue_core.sql
+20260209_fix_enter_queue_safe.sql
+20260310_admin_auth_function.sql
+20260316090000_canonicalize_queues.sql
+20260316100000_queue_status_lifecycle_enforcement.sql
+20260402120000_system_closure.sql
+20260410100000_create_doctors.sql
+20260412000000_backend_improvements.sql
+20260509000000_fix_schema_contracts.sql
+20260509000100_fix_notifications_admin_contract.sql
+20260509000200_add_notifications_compat_columns.sql
+20260509001000_open_notifications_public_write.sql
+20260509004000_notifications_core.sql
+20260509004100_operational_notifications.sql
+20260509004200_direct_alerts_bridge.sql
+20260509004300_operational_notifications_seed.sql
+20260509004400_notifications_patient_nullable.sql
+20260509004500_system_settings_contract.sql
+20260509005000_routes_id_fix.sql
+20260509006000_frontend_compatibility_contracts.sql
+20260509007000_patient_routes_patient_id_unique.sql
+20260510090000_add_to_queue_atomic_rpc.sql
+20260510103000_queue_display_number_uniqueness_and_atomic_rpc_fix.sql
+20260510120000_queue_atomic_insert_and_display_uniqueness.sql
+20260519120000_normalization_guard.sql

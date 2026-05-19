@@ -6,6 +6,9 @@ on:
       - 'supabase/migrations/**'
       - '.github/workflows/migration-guard.yml'
       - 'scripts/check-migration-table-conflicts.js'
+      - 'scripts/check-migration-safety.js'
+      - 'supabase/migrations/PRODUCTION_CHAIN.txt'
+      - 'docs/DB_SOURCE_OF_TRUTH.md'
   push:
     branches:
       - main
@@ -13,6 +16,9 @@ on:
       - 'supabase/migrations/**'
       - '.github/workflows/migration-guard.yml'
       - 'scripts/check-migration-table-conflicts.js'
+      - 'scripts/check-migration-safety.js'
+      - 'supabase/migrations/PRODUCTION_CHAIN.txt'
+      - 'docs/DB_SOURCE_OF_TRUTH.md'
 
 jobs:
   prevent-conflicting-table-recreate:
@@ -36,3 +42,11 @@ jobs:
       - name: Run migration conflict guard (push)
         if: github.event_name == 'push'
         run: node scripts/check-migration-table-conflicts.js "${{ github.event.before }}" "${{ github.sha }}"
+
+      - name: Run migration safety guard (PR)
+        if: github.event_name == 'pull_request'
+        run: node scripts/check-migration-safety.js "${{ github.event.pull_request.base.sha }}" "${{ github.sha }}"
+
+      - name: Run migration safety guard (push)
+        if: github.event_name == 'push'
+        run: node scripts/check-migration-safety.js "${{ github.event.before }}" "${{ github.sha }}"
