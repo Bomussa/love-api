@@ -2,15 +2,5 @@
   "version": 2,
   "rewrites": [
     { "source": "/api/v1/(.*)", "destination": "/api/v1.js" }
-  ],
-  "headers": [
-    {
-      "source": "/api/(.*)",
-      "headers": [
-        { "key": "Access-Control-Allow-Origin", "value": "https://mmc-mms.com, https://www.mmc-mms.com" },
-        { "key": "Access-Control-Allow-Methods", "value": "GET,POST,PUT,PATCH,DELETE,OPTIONS" },
-        { "key": "Access-Control-Allow-Headers", "value": "Content-Type,Authorization" }
-      ]
-    }
   ]
 }
