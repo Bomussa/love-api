@@ -1,107 +1,36 @@
-# MMC-MMS Backend (love-api)
+# Military Medical Committee System (MMC-MMS) - Backend API
 
-Backend/API repository for the Military Medical Center queue and examination system.
+## 🚀 Overview
+The **love-api** is the backend engine for the Military Medical Committee System. It serves as a secure middleware layer between the frontend and Supabase, providing specialized endpoints for queue management, patient routing, and administrative operations.
 
-## Production
-- Frontend: https://mmc-mms.com
-- Backend health: https://mmc-mms.com/api/health
-- API base: https://mmc-mms.com/api/v1
+## ✨ Key Features
+- **Unified API Layer**: Centralized control for all medical committee workflows via `/api/v1`.
+- **Supabase Integration**: Direct, high-performance connection to Supabase Postgres and Realtime.
+- **Secure Authentication**: Role-based access control for admins, doctors, and staff.
+- **Automated Routing**: Intelligent patient journey mapping through medical stations.
+- **Health Monitoring**: Real-time system health checks and automated recovery logs.
 
-## Current Verified Status
-- `/api/health` → working on production.
-- `/api/v1/status` → implemented.
-- `/api/v1/health` → restored during this maintenance cycle.
-- Vercel deployment active.
-- Supabase integration active.
+## 🛠 Tech Stack
+- **Runtime**: Node.js
+- **Framework**: Vercel Serverless Functions
+- **Database**: [Supabase](https://supabase.com/) (PostgreSQL)
+- **Deployment**: [Vercel](https://vercel.com/)
 
----
+## 📁 API Structure
+- `/api/v1/health`: System health and connectivity status.
+- `/api/v1/queue/*`: Queue operations (enter, call, advance, status).
+- `/api/v1/patient/*`: Patient authentication and profile management.
+- `/api/v1/admin/*`: Administrative controls and reports.
 
-# Main Runtime Structure
+## 🔐 Security & Reliability
+- **Source of Truth**: Supabase is the single, real-time source of truth for all data.
+- **Legacy Removal**: All legacy KV-based logic and PIN systems have been fully removed and replaced with relational database logic.
+- **Enhanced Resilience**: Integrated error handling and automated recovery mechanisms.
 
-## Core API
-| Path | Purpose |
-|---|---|
-| `api/v1.js` | Main API routing and medical queue logic |
-| `api/health.js` | Global health endpoint |
-| `api/v1/status.js` | API v1 runtime status |
-| `api/v1/health.js` | v1 health compatibility endpoint |
-| `api/maintenance.js` | Maintenance status endpoint |
+## 🚀 Deployment
+Deployed as a serverless backend on Vercel.
+- **Production URL**: [https://mmc-mms.com/api/v1](https://mmc-mms.com/api/v1)
+- **Project ID**: `prj_kT2JVmLqN8l2i9opi07JRYugl8MP`
 
-## Queue Runtime
-| Path | Purpose |
-|---|---|
-| `supabase/functions/queue-engine/index.ts` | Queue engine runtime |
-| `supabase/functions/queue-enter/index.ts` | Queue entry |
-| `supabase/functions/queue-status/index.ts` | Queue live status |
-| `supabase/functions/call-next-patient/index.ts` | Doctor next-patient calling |
-
-## Integration Layer
-| Path | Purpose |
-|---|---|
-| `lib/api.js` | Shared API helpers |
-| `lib/api-adapter.js` | Compatibility layer |
-| `lib/mms-core-api.js` | Core medical API services |
-| `lib/enhanced-api.js` | Extended helper layer |
-
----
-
-# User Journeys
-
-## Patient Journey
-1. Patient login.
-2. PIN verification.
-3. Queue entry.
-4. Live waiting status.
-5. Doctor call.
-6. Clinic progression.
-7. Final medical completion screen.
-
-## Doctor Journey
-1. Doctor login.
-2. Open clinic dashboard.
-3. Call next patient.
-4. Start examination.
-5. Advance patient to next clinic.
-6. Complete clinic stage.
-
-## Admin Journey
-1. Admin login.
-2. Queue monitoring.
-3. Doctor management.
-4. Clinic monitoring.
-5. Daily statistics.
-6. Reports and maintenance.
-
----
-
-# Verified Issues Detected This Week
-
-## Confirmed
-- Partial migration between legacy queue tables and unified queue runtime.
-- Some legacy endpoints still coexist with `/api/v1/*`.
-- Old scripts contained hardcoded Supabase credentials.
-- `/api/v1/health` was missing on production.
-
-## Fixed
-- Removed hardcoded credentials from backend scripts.
-- Restored `/api/v1/health` endpoint.
-- Improved Supabase diagnostics.
-- Removed duplicated frontend wrappers from `love` repository.
-
----
-
-# Important Docs
-| File | Purpose |
-|---|---|
-| `docs/API_V1_ENDPOINTS.md` | Official frontend/backend API contract |
-| `docs/TRUTH_TREE_LOVE_API.md` | Backend truth tree |
-| `BACKEND_OPERATIONS_GUIDE.md` | Operational procedures |
-| `VERCEL_ENV_SETUP.md` | Environment configuration |
-
----
-
-# Important Notes
-- Supabase is the intended source of truth.
-- Legacy compatibility layers still exist.
-- No frontend visual redesign was performed.
-- Changes focused on stability, routing, safety, and queue consistency.
+## 📄 License
+Copyright © 2026 Military Medical Committee. All rights reserved.

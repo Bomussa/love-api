@@ -6,7 +6,7 @@
 export const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-API-Version',
   'Access-Control-Max-Age': '86400',
 };
 
@@ -23,7 +23,7 @@ export function generateUniqueNumber() {
   return parseInt(`${timestamp}${random}`);
 }
 
-// PIN system permanently removed - function deleted
+// PIN system permanently removed
 
 // Validate Patient ID
 export function validatePatientId(patientId) {
@@ -42,7 +42,7 @@ export function validateClinic(clinic) {
     'internal', 'ent', 'surgery', 'dental', 'psychiatry',
     'derma', 'bones'
   ];
-  return validClinics.includes(clinic);
+  return validClinics.includes(clinic.toLowerCase());
 }
 
 // Get all valid clinics
@@ -54,99 +54,6 @@ export function getValidClinics() {
   ];
 }
 
-// Emit Queue Event
-export async function emitQueueEvent(env, clinic, user, type, position) {
-  try {
-    const event = {
-      type,
-      clinic,
-      user,
-      position,
-      timestamp: new Date().toISOString()
-    };
-    const eventKey = `event:${clinic}:${user}:${Date.now()}`;
-    await env.KV_EVENTS.put(eventKey, JSON.stringify(event), {
-      expirationTtl: 3600
-    });
-  } catch (error) {
-    console.error('Failed to emit event:', error);
-  }
-}
-
-// Rate Limiting
-const RATE_LIMIT = {
-  windowMs: 60000, // 1 minute
-  maxRequests: 100  // max requests per window
-};
-
-export async function checkRateLimit(env, clientId) {
-  const key = `ratelimit:${clientId}`;
-  const current = await env.KV_CACHE.get(key, { type: 'json' }) || {
-    count: 0,
-    resetAt: Date.now() + RATE_LIMIT.windowMs
-  };
-  
-  if (Date.now() > current.resetAt) {
-    current.count = 0;
-    current.resetAt = Date.now() + RATE_LIMIT.windowMs;
-  }
-  
-  if (current.count >= RATE_LIMIT.maxRequests) {
-    return { allowed: false, resetAt: current.resetAt };
-  }
-  
-  current.count++;
-  await env.KV_CACHE.put(key, JSON.stringify(current), {
-    expirationTtl: Math.ceil(RATE_LIMIT.windowMs / 1000)
-  });
-  
-  return { allowed: true, remaining: RATE_LIMIT.maxRequests - current.count };
-}
-
-// Distributed Lock
-export async function acquireLock(env, resource, timeout = 5000) {
-  const lockKey = `lock:${resource}`;
-  const lockId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-  const expiresAt = Date.now() + timeout;
-  
-  const existingLock = await env.KV_LOCKS.get(lockKey, { type: 'json' });
-  
-  if (existingLock && Date.now() < existingLock.expiresAt) {
-    throw new Error('Resource is locked');
-  }
-  
-  await env.KV_LOCKS.put(lockKey, JSON.stringify({
-    id: lockId,
-    expiresAt
-  }), {
-    expirationTtl: Math.max(60, Math.ceil(timeout / 1000))
-  });
-  
-  return lockId;
-}
-
-export async function releaseLock(env, resource, lockId) {
-  const lockKey = `lock:${resource}`;
-  const existingLock = await env.KV_LOCKS.get(lockKey, { type: 'json' });
-  
-  if (existingLock && existingLock.id === lockId) {
-    await env.KV_LOCKS.delete(lockKey);
-    return true;
-  }
-  
-  return false;
-}
-
-export async function withLock(env, resource, fn) {
-  const lockId = await acquireLock(env, resource);
-  
-  try {
-    return await fn();
-  } finally {
-    await releaseLock(env, resource, lockId);
-  }
-}
-
 // Get Client IP
 export function getClientIP(req) {
   return req.headers['x-forwarded-for']?.split(',')[0] ||
@@ -154,4 +61,3 @@ export function getClientIP(req) {
          req.socket?.remoteAddress ||
          'unknown';
 }
-
