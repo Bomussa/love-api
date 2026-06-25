@@ -1,4 +1,5 @@
 import apiHandler from '../lib/api-handlers.js';
+import sessionHandler from '../lib/session-handlers.js';
 
 const ADMIN_EF   = 'https://rujwuruuosffcxazymit.supabase.co/functions/v1/admin-login';
 const PATIENT_EF = 'https://rujwuruuosffcxazymit.supabase.co/functions/v1/patient-login';
@@ -46,6 +47,11 @@ export default async function handler(req, res) {
   // DEBUG
   if (pathname.includes('/debug')) {
     return res.status(200).json({ rawUrl, pathname, method, host });
+  }
+
+  // Session endpoints
+  if (pathname.startsWith('/api/v1/session/')) {
+    return sessionHandler(req, res);
   }
 
   // Admin + Doctor login
